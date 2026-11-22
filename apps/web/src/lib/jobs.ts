@@ -228,6 +228,18 @@ export async function payJob(
     if (!stripeTestNetworkEnabled(process.env)) {
       job.payment = plan;
       job.status = "queued";
+      job.startedAt = Date.now();
+      if (!job.transcript) {
+        job.cursor = job.stages.length;
+        job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
+        job.finishedAt = Date.now();
+        job.paragraphs = sandboxReply({
+          name: job.title,
+          instructions: job.instructions ?? "",
+          knowledge: "",
+          need: job.opportunityName,
+        });
+      }
       await writeJob(job);
       return job;
     }

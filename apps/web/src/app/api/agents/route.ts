@@ -1,6 +1,8 @@
-import { canSell } from "@/lib/accounts";
+import { cookies } from "next/headers";
+import { canSell, registerAccount, sessionCookie, updateAccount } from "@/lib/accounts";
 import { isListingSlug, saveAgent, type AgentInput } from "@/lib/marketplace";
 import type { KnowledgeNote } from "@/lib/demo-store";
+import { requestIsSecure } from "@/lib/request-guard";
 import { formLocale, redirectTo } from "@/server/http";
 import { currentUser } from "@/server/session";
 
@@ -32,24 +34,43 @@ export async function POST(request: Request) {
   const form = await request.formData();
   const locale = formLocale(form);
   const slug = String(form.get("slug") ?? "");
+  const skill = String(form.get("skill") ?? "");
   if (slug && !isListingSlug(slug)) {
-    return redirectTo(request, `/${locale}/sell`, { error: "missing" });
+    return redirectTo(request, `/${locale}/earn`, { error: "missing", skill });
   }
-  const back = slug ? `/${locale}/sell/${slug}` : `/${locale}/sell/new`;
-  const user = await currentUser();
-  if (!user) {
+  const back = slug ? `/${locale}/sell/${slug}` : `/${locale}/earn`;
+  let user = await currentUser();
+  if (!user && !String(form.get("accountName") ?? "").trim() && !String(form.get("email") ?? "").trim()) {
     return redirectTo(request, `/${locale}/sign-in`, { next: back });
   }
+  if (!user) {
+    const registered = await registerAccount({
+      name: String(form.get("accountName") ?? ""),
+      email: String(form.get("email") ?? ""),
+      password: String(form.get("password") ?? ""),
+      role: "seller",
+      operatorCode: "",
+    });
+    if (!registered.ok) {
+      return redirectTo(request, back, { error: registered.error, skill });
+    }
+    const jar = await cookies();
+    jar.set(sessionCookie(registered.token, requestIsSecure(request)));
+    user = registered.user;
+  }
   if (!canSell(user.role)) {
-    return redirectTo(request, `/${locale}/sell`, { error: "forbidden" });
+    const upgraded = await updateAccount(user.id, { name: user.name, bio: user.bio, role: "both" });
+    if (!upgraded.ok) {
+      return redirectTo(request, back, { error: upgraded.error, skill });
+    }
   }
   const intent = String(form.get("intent") ?? "draft");
   if (intent !== "draft" && intent !== "publish" && intent !== "unpublish") {
-    return redirectTo(request, back, { error: "generic" });
+    return redirectTo(request, back, { error: "generic", skill });
   }
   const knowledge = await knowledgeFrom(form);
   if (knowledge.error) {
-    return redirectTo(request, back, { error: knowledge.error });
+    return redirectTo(request, back, { error: knowledge.error, skill });
   }
   const input: AgentInput = {
     name: String(form.get("name") ?? ""),
@@ -64,7 +85,7 @@ export async function POST(request: Request) {
   };
   const saved = await saveAgent(user.id, input, intent, slug || undefined);
   if (!saved.ok) {
-    return redirectTo(request, back, { error: saved.error });
+    return redirectTo(request, back, { error: saved.error, skill });
   }
   const next = intent === "publish" ? `/${locale}/listings/${saved.slug}` : `/${locale}/sell/${saved.slug}`;
   return redirectTo(request, next);

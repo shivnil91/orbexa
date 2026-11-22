@@ -46,24 +46,24 @@ test("buyer journey keeps missing evidence and clears the vitals budget", async 
   }
 
   await page.getByRole("link", { name: /Expert Verified/ }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Intake");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Name this job");
   await expectAccessible(page);
   if (info.project.name === "desktop") {
     await page.screenshot({ path: "/opt/cursor/artifacts/intake.png", fullPage: true });
   }
   await page.getByLabel("Opportunity name").fill("Fictional ward beds");
-  await page.getByRole("button", { name: "Review the order" }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Checkout");
-  await expect(page.getByText("Simulated checkout")).toBeVisible();
+  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Pay");
+  await expect(page.getByText("Demo payment. No card is charged.")).toBeVisible();
   await expect(page.getByText("Review fee")).toBeVisible();
   await expectAccessible(page);
   if (info.project.name === "desktop") {
     await page.screenshot({ path: "/opt/cursor/artifacts/checkout.png", fullPage: true });
   }
-  await page.getByRole("button", { name: "Confirm simulated payment" }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Run");
+  await page.getByRole("button", { name: "Pay and get the draft" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Your draft");
   for (let step = 0; step < 6; step += 1) {
-    const next = page.getByRole("button", { name: "Show next stage" });
+    const next = page.getByRole("button", { name: "Show the next part" });
     if (!(await next.count())) {
       break;
     }
@@ -75,12 +75,12 @@ test("buyer journey keeps missing evidence and clears the vitals budget", async 
   if (info.project.name === "desktop") {
     await page.screenshot({ path: "/opt/cursor/artifacts/run.png", fullPage: true });
   }
-  await page.getByRole("link", { name: "Review the deliverable" }).click();
+  await page.getByRole("link", { name: "Read the draft" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review");
   await expect(page.getByRole("checkbox", { name: /future training set/ })).not.toBeChecked();
-  await page.getByRole("button", { name: "Record expert approval" }).click();
-  await page.getByRole("button", { name: "Accept deliverable" }).click();
-  await expect(page.getByText("buyer_approve")).toBeVisible();
+  await page.getByRole("button", { name: "An expert has looked at this" }).click();
+  await page.getByRole("button", { name: "Accept this draft" }).click();
+  await expect(page.getByText("You accepted this draft")).toBeVisible();
   await expectAccessible(page);
   if (info.project.name === "desktop") {
     await page.screenshot({ path: "/opt/cursor/artifacts/review.png", fullPage: true });

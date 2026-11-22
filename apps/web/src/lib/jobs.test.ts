@@ -247,6 +247,38 @@ test("shared demo consent does not opt in another job", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("a paid everyday job returns the draft without another step", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-jobs-"));
+  const previous = {
+    provider: process.env.PAYMENT_PROVIDER,
+    key: process.env.STRIPE_TEST_SECRET_KEY,
+    network: process.env.STRIPE_TEST_NETWORK,
+    webhook: process.env.STRIPE_TEST_WEBHOOK_SECRET,
+  };
+  process.env.ORBEXA_JOB_DIR = directory;
+  delete process.env.PAYMENT_PROVIDER;
+  delete process.env.STRIPE_TEST_SECRET_KEY;
+  delete process.env.STRIPE_TEST_NETWORK;
+  delete process.env.STRIPE_TEST_WEBHOOK_SECRET;
+  try {
+    const job = await createJob({
+      locale: "en",
+      slug: "example-support-reply",
+      tier: "autonomous",
+      intake: { need: "Draft a calm support reply" },
+    });
+    const paid = await payJob(job.id);
+    assert.equal(paid.status, "waiting_for_buyer");
+    assert.match(paid.paragraphs.join("\n"), /Draft a calm support reply/);
+    assert.match(paid.paragraphs[0] ?? "", /Sample draft/);
+    assert.equal(paid.paragraphs[0]?.toLowerCase().includes("fixture"), false);
+  } finally {
+    restoreEnv(previous);
+    delete process.env.ORBEXA_JOB_DIR;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 });
 
 function restoreEnv(previous: { provider?: string; key?: string; network?: string; webhook?: string }) {

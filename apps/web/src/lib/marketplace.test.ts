@@ -12,6 +12,8 @@ import {
   browseCatalog,
   buildCatalog,
   recommend,
+  draftFromSkill,
+  listingSlugFromName,
   sandboxReply,
   saveAgent,
   scoreMatch,
@@ -101,11 +103,33 @@ test("generated tiers balance and live runs replace example run counts", () => {
   assert.equal(first?.slug.length > 0, true);
 });
 
-test("the sandbox reply is labeled as a fixture and quotes the request", () => {
+test("the sandbox reply is labeled as a sample draft and quotes the request", () => {
   const paragraphs = sandboxReply({ name: "Load checker", instructions: "Flag missing load cases.", knowledge: "LC2", need: "Check bridge load case LC2" });
-  assert.match(paragraphs[0] ?? "", /Demo fixture/);
+  assert.match(paragraphs[0] ?? "", /Sample draft/);
+  assert.match(paragraphs[0] ?? "", /not a live model/);
   assert.match(paragraphs.join("\n"), /Check bridge load case LC2/);
   assert.match(paragraphs.join("\n"), /Flag missing load cases/);
+});
+
+test("a skill becomes a priced draft a buyer can preview", () => {
+  const drawing = draftFromSkill("Checking engineering drawings for missing dimensions and clashes");
+  const books = draftFromSkill("Closing the books for small shops and flagging expenses that need a receipt");
+  const soccer = draftFromSkill("Writing youth soccer practice plans that parents can use at the park");
+  assert.equal(drawing?.category, "engineering");
+  assert.equal(drawing?.priceRaw, "45");
+  assert.equal(books?.category, "operations");
+  assert.equal(books?.priceRaw, "35");
+  assert.equal(soccer?.category, "writing");
+  assert.equal(soccer?.priceRaw, "20");
+  assert.equal(draftFromSkill("too short"), null);
+  const slug = listingSlugFromName("Load checker mobile-1795387568475 flags missing bridge load cases");
+  assert.match(slug, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+  assert.equal(slug.includes("--"), false);
+  for (const draft of [drawing, books, soccer]) {
+    if (!draft) throw new Error("draft missing");
+    const saved = validateAgent({ ...draft, knowledge: [] }, "publish");
+    assert.equal(saved.ok, true);
+  }
 });
 
 test("publish validation rejects a short instruction and accepts a complete agent", () => {

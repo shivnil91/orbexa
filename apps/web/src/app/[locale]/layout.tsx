@@ -14,9 +14,8 @@ export default async function LocaleLayout({
   const active: Locale = isSupportedLocale(locale) ? locale : "en";
   const user = await currentUser();
   const links = [
-    ["nav.browse", `/${active}/listings`],
-    ["nav.search", `/${active}/search`],
-    ["nav.sell", `/${active}/sell`],
+    ["home.buyerDoor", `/${active}/get`],
+    ["home.sellerDoor", `/${active}/earn`],
     ...(user ? [["nav.orders", `/${active}/orders`] as const] : []),
   ];
   return (
@@ -44,9 +43,7 @@ export default async function LocaleLayout({
                 <input name="locale" type="hidden" value={active} />
                 <button className="inline-flex min-h-11 items-center rounded-full px-3 text-sm" type="submit">{t(active, "nav.signOut")}</button>
               </form>
-            ) : (
-              <Link className="inline-flex min-h-11 items-center rounded-full bg-accent px-3 text-sm font-medium text-accent-foreground" href={`/${active}/register`}>{t(active, "nav.register")}</Link>
-            )}
+            ) : null}
           </nav>
         </div>
       </header>

@@ -155,7 +155,7 @@ const EXAMPLES: ExampleAgent[] = [
     slug: "example-ops-checklist",
     name: "Ops checklist",
     category: "operations",
-    pitch: "Turn a recurring operations task into a checklist a teammate can run.",
+    pitch: "Turn a recurring operations task into a checklist a teammate can follow.",
     description: "Example agent for an internal checklist. It does not connect to a live operations tool.",
     instructions: "Write a numbered checklist. Mark any step that needs a human to confirm.",
     priceMinor: 2500,
@@ -195,6 +195,36 @@ const EXAMPLES: ExampleAgent[] = [
     output: { title: "Example output", body: "Example only. Out of scope: visual design. Assumption: one reviewer." },
     reviews: [{ rating: 5, body: "Example review. The out-of-scope list is the useful part.", createdAt: "2026-04-18T00:00:00.000Z" }],
     agentVersionId: "11111111-1111-4111-8111-111111111117",
+  },
+  {
+    slug: "example-monthly-close",
+    name: "Monthly close checklist",
+    category: "operations",
+    pitch: "Turn a month of shop expenses into a close checklist and the questions to ask.",
+    description: "Example agent for a bookkeeper's monthly close. It does not file a return or connect to accounting software.",
+    instructions: "List expenses that need a receipt and questions for the owner. Do not invent totals.",
+    priceMinor: 3500,
+    exampleRuns: 6,
+    featured: true,
+    createdAt: "2026-04-12T00:00:00.000Z",
+    output: { title: "Sample draft", body: "Example only. Three expenses have no receipt. No total was invented." },
+    reviews: [{ rating: 5, body: "Example review. The missing receipts were listed.", createdAt: "2026-04-20T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111118",
+  },
+  {
+    slug: "example-practice-plan",
+    name: "Soccer practice plan",
+    category: "writing",
+    pitch: "Write a one-hour youth soccer practice a parent can lead at the park.",
+    description: "Example agent for a practice plan. It does not replace a coach on the field.",
+    instructions: "Write a one-hour plan with a warm-up, a game, and a cool-down. Do not invent league rules.",
+    priceMinor: 2000,
+    exampleRuns: 3,
+    featured: false,
+    createdAt: "2026-04-22T00:00:00.000Z",
+    output: { title: "Sample draft", body: "Example only. Warm-up, a passing game, and a cool-down. No league rule was invented." },
+    reviews: [{ rating: 5, body: "Example review. A parent could follow the plan.", createdAt: "2026-04-28T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111119",
   },
 ];
 
@@ -293,11 +323,11 @@ export function buildCatalog(db: MarketplaceDb = emptyDb()): CatalogItem[] {
       slug: hospital.slug,
       name: hospital.title,
       pitch: hospital.summary,
-      description: "Example tender-writing pack. The run drafts from fixture notes and leaves a missing certificate as missing evidence. This is not a live procurement offer.",
+      description: "Example tender pack. A sourced bid draft that leaves a missing certificate as missing evidence. This is not a live procurement offer.",
       category: "tenders",
-      instructions: "Use only the fixture notes. Cite a source for every claim. Leave gaps empty.",
+      instructions: "Use only the sample notes. Cite a source for every claim. Leave gaps empty.",
       knowledge: [],
-      exampleOutputs: [{ title: "Example fixture excerpt", body: "Example output only. A supported claim can cite 950 mm from the fixture notes. A requirement with no certificate stays missing evidence." }],
+      exampleOutputs: [{ title: "Sample draft", body: "Example output only. A supported claim can cite 950 mm from the sample notes. A requirement with no certificate stays missing evidence." }],
       sellerId: EXAMPLE_SELLER_ID,
       sellerName: EXAMPLE_SELLER_NAME,
       sellerBio: EXAMPLE_SELLER_BIO,
@@ -311,7 +341,7 @@ export function buildCatalog(db: MarketplaceDb = emptyDb()): CatalogItem[] {
       runs: 24,
       runsExample: true,
       createdAt: "2025-11-01T00:00:00.000Z",
-      listing: { ...hospital, sellerId: EXAMPLE_SELLER_ID, instructions: "Use only the fixture notes. Cite a source for every claim. Leave gaps empty." },
+      listing: { ...hospital, sellerId: EXAMPLE_SELLER_ID, instructions: "Use only the sample notes. Cite a source for every claim. Leave gaps empty." },
       reviews: HOSPITAL_REVIEWS,
     }, true));
   }
@@ -572,12 +602,65 @@ export function recommend(need: string, items: CatalogItem[]): { item: CatalogIt
 export function sandboxReply(input: { name: string; instructions: string; knowledge: string; need: string }): string[] {
   const notes = input.knowledge.trim();
   return [
-    `Demo fixture for ${input.name.trim() || "this agent"}. This is not a live model response.`,
+    `Sample draft for ${input.name.trim() || "this listing"}. This demo wrote it from the listing. It is not a live model, and it is not certified work.`,
     `You asked: ${input.need.trim()}`,
     `Instructions used: ${input.instructions.trim() || "No instructions were saved."}`,
-    notes ? `Knowledge notes considered: ${notes.slice(0, 500)}` : "No knowledge notes were attached.",
-    "Nothing here is a finished professional work product.",
+    notes ? `Notes considered: ${notes.slice(0, 500)}` : "No extra notes were attached.",
+    "Read this as a draft. A person has not signed it.",
   ];
+}
+
+export type SkillDraft = {
+  name: string;
+  pitch: string;
+  description: string;
+  category: CategoryCode;
+  instructions: string;
+  exampleTitle: string;
+  exampleBody: string;
+  priceRaw: string;
+  priceMinor: number;
+};
+
+function clip(value: string, max: number): string {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= max) {
+    return cleaned;
+  }
+  return cleaned.slice(0, max).trim();
+}
+
+export function draftFromSkill(skillRaw: string): SkillDraft | null {
+  const skill = skillRaw.replace(/\s+/g, " ").trim();
+  if (skill.length < 12 || skill.length > 500) {
+    return null;
+  }
+  const guessed = guessSkill(skill);
+  const pitch = clip(`Buyers get a draft for this: ${skill}`, 180);
+  return {
+    name: clip(skill, 80),
+    pitch,
+    description: clip(`${skill} The draft uses only what the buyer writes and does not invent facts.`, 500),
+    category: guessed.category,
+    instructions: `Use only what the buyer wrote. Skill: ${skill} Do not invent facts, numbers, prices, or sources.`,
+    exampleTitle: "Sample draft",
+    exampleBody: clip(`Sample only. A buyer would get a draft about: ${skill} Nothing was invented.`, 400),
+    priceRaw: guessed.priceRaw,
+    priceMinor: Number(guessed.priceRaw) * 100,
+  };
+}
+
+function guessSkill(skill: string): { category: CategoryCode; priceRaw: string } {
+  const text = skill.toLowerCase();
+  if (/soccer|practice plan|youth sport/.test(text)) return { category: "writing", priceRaw: "20" };
+  if (/bookkeep|invoice|expense|closing the books|close the books|receipt/.test(text)) return { category: "operations", priceRaw: "35" };
+  if (/drawing|dimension|engineer|clash|structural|load case/.test(text)) return { category: "engineering", priceRaw: "45" };
+  if (/support reply|customer reply|\breply\b/.test(text)) return { category: "support", priceRaw: "15" };
+  if (/clause|contract|legal/.test(text)) return { category: "legal", priceRaw: "60" };
+  if (/checklist|onboarding|operations/.test(text)) return { category: "operations", priceRaw: "35" };
+  if (/research|citation/.test(text)) return { category: "research", priceRaw: "40" };
+  if (/interface|screen|design/.test(text)) return { category: "design", priceRaw: "35" };
+  return { category: "writing", priceRaw: "25" };
 }
 
 export function parsePriceDollars(raw: string): number | null {
@@ -652,13 +735,17 @@ export function validateAgent(input: AgentInput, intent: "draft" | "publish"): {
   };
 }
 
-function slugify(name: string, taken: Set<string>): string {
-  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+export function listingSlugFromName(name: string, taken: Set<string> = new Set()): string {
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
   let slug = `${base || "agent"}-${randomBytes(3).toString("hex")}`;
   while (taken.has(slug)) {
     slug = `${base || "agent"}-${randomBytes(3).toString("hex")}`;
   }
   return slug;
+}
+
+function slugify(name: string, taken: Set<string>): string {
+  return listingSlugFromName(name, taken);
 }
 
 function takenSlugs(db: MarketplaceDb): Set<string> {
