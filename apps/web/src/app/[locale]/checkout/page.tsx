@@ -1,16 +1,20 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
+import { Notice } from "@/components/notice";
 import { formatMoney } from "@/lib/format";
-import { t } from "@/lib/i18n";
+import { messageFor, t } from "@/lib/i18n";
+import { canMutateJob, jobReadDecision } from "@/lib/job-access";
 import { isSupportedLocale } from "@/lib/locale";
 import { readJob } from "@/lib/jobs";
+import { stripeTestNetworkEnabled } from "@/lib/payments";
+import { currentUser } from "@/server/session";
 
 export default async function CheckoutPage({
   params,
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ job?: string }>;
+  searchParams: Promise<{ job?: string; error?: string; notice?: string }>;
 }) {
   const { locale } = await params;
   await connection();
@@ -22,7 +26,23 @@ export default async function CheckoutPage({
   if (!job) {
     notFound();
   }
+  const user = await currentUser();
+  const decision = jobReadDecision(job.tenantId, user);
+  if (decision === "sign-in") {
+    redirect(`/${locale}/sign-in?next=${encodeURIComponent(`/${locale}/checkout?job=${job.id}`)}`);
+  }
+  if (decision === "hide") {
+    notFound();
+  }
+  const allowMutate = canMutateJob(job.tenantId, user);
   const total = job.priceMinor;
+  const error = messageFor(locale, query.error);
+  let stripeReady = false;
+  try {
+    stripeReady = stripeTestNetworkEnabled();
+  } catch {
+    stripeReady = false;
+  }
   return (
     <main id="content" className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 py-12 sm:px-8">
       <header>
@@ -42,13 +62,14 @@ export default async function CheckoutPage({
           <div className="flex justify-between gap-4"><dt>{t(locale, "listing.cancellation")}</dt><dd className="text-right">{t(locale, `cancel.${job.cancellationCode}`)}</dd></div>
           <div className="flex justify-between gap-4"><dt>{t(locale, "listing.payout")}</dt><dd>{t(locale, `payout.${job.payoutRelease}`)}</dd></div>
         </dl>
-        <p className="mt-4 rounded-xl bg-warning-bg p-3 text-sm leading-6 text-warning">{t(locale, "checkout.simulated")}</p>
-        <form className="mt-5" action={`/api/jobs/${job.id}/checkout`} method="post">
+        {error ? <div className="mt-4"><Notice tone="error">{error}</Notice></div> : null}
+        <p className="mt-4 rounded-xl bg-warning-bg p-3 text-sm leading-6 text-warning">{stripeReady || query.notice === "stripe" ? t(locale, "checkout.stripeReady") : t(locale, "checkout.simulated")}</p>
+        {allowMutate ? <form className="mt-5" action={`/api/jobs/${job.id}/checkout`} method="post">
           <input type="hidden" name="locale" value={locale} />
           <button className="inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-5 text-accent-foreground" type="submit">
             {t(locale, "checkout.pay")}
           </button>
-        </form>
+        </form> : null}
       </section>
     </main>
   );

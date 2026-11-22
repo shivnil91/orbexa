@@ -33,6 +33,9 @@ export type Listing = {
   model: "fixture";
   agentVersionId: string;
   tiers: Tier[];
+  instructions?: string;
+  knowledge?: { name: string; text: string }[];
+  sellerId?: string;
 };
 
 export type VerticalPack = {
@@ -138,19 +141,30 @@ const tenderPack: VerticalPack = {
   ],
 };
 
+const genericPack: VerticalPack = {
+  code: "generic",
+  intakeSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["need"],
+    properties: {
+      need: { type: "string", minLength: 1 },
+    },
+  },
+  workflow: ["understand", "draft", "deliver"],
+  rubric: ["answers_the_request"],
+  deliverableTypes: [],
+};
+
 export const listings: Listing[] = [hospitalBeds];
-export const packs: Record<string, VerticalPack> = { tender_writing: tenderPack };
+export const packs: Record<string, VerticalPack> = { tender_writing: tenderPack, generic: genericPack };
 
 export function listingBySlug(slug: string): Listing | undefined {
   return listings.find((item) => item.slug === slug);
 }
 
 export function packFor(listing: Listing): VerticalPack {
-  const pack = packs[listing.vertical];
-  if (!pack) {
-    throw new Error(`vertical pack ${listing.vertical} is not loaded`);
-  }
-  return pack;
+  return packs[listing.vertical] ?? genericPack;
 }
 
 export function lowestTier(listing: Listing): Tier {

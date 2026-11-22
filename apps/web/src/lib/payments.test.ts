@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LiveStripeKeyError, checkoutPlan, sendStripeTestCheckout, verifyStripeTestWebhook } from "./payments.ts";
+import { LiveStripeKeyError, checkoutPlan, sendStripeTestCheckout, stripeTestTransport, verifyStripeTestWebhook } from "./payments.ts";
 
 const orderId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
@@ -36,7 +36,10 @@ test("a Stripe test key does not hit the network unless that switch is on", asyn
   const sent = await sendStripeTestCheckout(input, { ...env, STRIPE_TEST_NETWORK: "1" }, async (call) => {
     seen = call.headers.authorization;
     idempotency = call.headers["idempotency-key"];
-    assert.equal(new URLSearchParams(call.body).get("line_items[0][price_data][unit_amount]"), "80000");
+    const params = new URLSearchParams(call.body);
+    assert.equal(params.get("line_items[0][price_data][unit_amount]"), "80000");
+    assert.equal(params.get("payment_intent_data[transfer_data][destination]"), null);
+    assert.equal(params.get("payment_intent_data[metadata][order_id]"), orderId);
     return {
       status: 200,
       body: JSON.stringify({ id: "cs_test_123", livemode: false, amount_total: 80000, currency: "usd" }),
@@ -58,6 +61,27 @@ test("a Stripe test key does not hit the network unless that switch is on", asyn
       body: JSON.stringify({ id: "cs_test_123", livemode: false, amount_total: 1, currency: "usd" }),
     })),
     /order snapshot/,
+  );
+  const routed = await sendStripeTestCheckout(input, { ...env, STRIPE_TEST_NETWORK: "1" }, async (call) => {
+    const params = new URLSearchParams(call.body);
+    assert.equal(params.get("payment_intent_data[transfer_data][destination]"), "acct_seller123");
+    assert.equal(params.get("payment_intent_data[application_fee_amount]"), String(plan.platformFeeMinor + plan.reviewFeeMinor));
+    return {
+      status: 200,
+      body: JSON.stringify({ id: "cs_test_123", livemode: false, amount_total: 80000, currency: "usd" }),
+    };
+  }, { destinationAccountId: "acct_seller123" });
+  assert.equal(routed.id, "cs_test_123");
+  await sendStripeTestCheckout(input, { ...env, STRIPE_TEST_NETWORK: "1" }, async (call) => {
+    assert.equal(new URLSearchParams(call.body).get("payment_intent_data[transfer_data][destination]"), null);
+    return {
+      status: 200,
+      body: JSON.stringify({ id: "cs_test_123", livemode: false, amount_total: 80000, currency: "usd" }),
+    };
+  }, { destinationAccountId: "https://evil.example" });
+  await assert.rejects(
+    stripeTestTransport({ url: "https://evil.example/v1/charges", headers: { authorization: "Bearer sk_test_example" }, body: "" }),
+    /host/,
   );
 });
 

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
-import { recordJobFeedback } from "@/lib/jobs";
 import type { FeedbackKind } from "@orbexa/db/feedback.ts";
+import { canMutateJob } from "@/lib/job-access";
+import { readJob, recordJobFeedback } from "@/lib/jobs";
+import { appUrl, formLocale, redirectTo } from "@/server/http";
+import { currentUser } from "@/server/session";
 
 const KINDS = new Set([
   "buyer_approve",
@@ -16,21 +19,26 @@ const KINDS = new Set([
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const form = await request.formData();
-  const locale = String(form.get("locale") ?? "en");
+  const locale = formLocale(form);
+  const user = await currentUser();
+  const existing = await readJob(id);
+  if (!existing || !canMutateJob(existing.tenantId, user)) {
+    return redirectTo(request, `/${locale}/sign-in`, { error: "forbidden" });
+  }
   const kind = String(form.get("kind") ?? "");
   if (!KINDS.has(kind) || form.get("body") || form.get("founderAuthorise")) {
-    return NextResponse.json({ error: "feedback" }, { status: 400 });
+    return redirectTo(request, `/${locale}/jobs/${existing.id}/review`, { error: "forbidden" });
   }
   const distance = form.get("editDistance");
   const rating = form.get("rating");
   try {
-    await recordJobFeedback(id, {
+    await recordJobFeedback(existing.id, {
       kind: kind as FeedbackKind,
       editDistance: typeof distance === "string" && distance.length > 0 ? Number(distance) : null,
       rating: typeof rating === "string" && rating.length > 0 ? Number(rating) : null,
     });
   } catch {
-    return NextResponse.json({ error: "feedback" }, { status: 400 });
+    return redirectTo(request, `/${locale}/jobs/${existing.id}/review`, { error: "forbidden" });
   }
-  return NextResponse.redirect(new URL(`/${locale}/jobs/${id}/review`, request.url), 303);
+  return NextResponse.redirect(appUrl(request, `/${locale}/jobs/${existing.id}/review`), 303);
 }

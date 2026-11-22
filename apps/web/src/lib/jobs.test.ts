@@ -6,6 +6,7 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import {
   applyVerifiedStripePayment,
+  applyVerifiedStripeRefund,
   createJob,
   payJob,
   readConsent,
@@ -13,6 +14,7 @@ import {
   recordExpertSignal,
   recordJobFeedback,
   revealNext,
+  setJobConsent,
 } from "./jobs.ts";
 import { verifyStripeTestWebhook } from "./payments.ts";
 
@@ -72,6 +74,9 @@ test("payment uses the stored snapshot and cannot be skipped or repeated", async
       tier: "expert_verified",
       intake: { opportunity_name: "Fictional beds" },
     });
+    const unpaid = await revealNext(job.id);
+    assert.equal(unpaid.status, "checkout");
+    assert.equal(unpaid.cursor, 0);
     await assert.rejects(recordJobFeedback(job.id, { kind: "buyer_approve" }), /not available/);
     await assert.rejects(recordExpertSignal(job.id), /not available/);
     assert.equal((await readJob(job.id))?.status, "checkout");
@@ -177,8 +182,67 @@ test("a signed test webhook queues the snapshot amount and a mismatch does not",
     assert.equal(replayed.status, stepped.status);
     assert.equal(replayed.cursor, stepped.cursor);
     assert.equal(await readFile(path.join(directory, `${job.id}.json`), "utf8").then((text) => text.includes("sk_test_example")), false);
+    const refund = {
+      id: "evt_refund",
+      type: "refund.succeeded" as const,
+      orderId: job.id,
+      amountMinor: job.priceMinor,
+      currency: "USD",
+      platformFeeMinor: job.platformFeeMinor,
+      creatorRoyaltyMinor: job.creatorRoyaltyMinor,
+      reviewFeeMinor: job.reviewFeeMinor,
+      taxMinor: 0,
+      livemode: false as const,
+    };
+    const cursor = (await readJob(job.id))?.cursor ?? 0;
+    const refunded = await applyVerifiedStripeRefund(refund);
+    assert.equal(refunded.refunded, true);
+    assert.equal(refunded.status, "rejected");
+    const stayed = await revealNext(job.id);
+    assert.equal(stayed.cursor, cursor);
+    assert.equal(stayed.status, "rejected");
+    await assert.rejects(recordJobFeedback(job.id, { kind: "buyer_approve" }), /refunded/);
+    const replay = await applyVerifiedStripeRefund(refund);
+    assert.equal(replay.cursor, stayed.cursor);
+    await assert.rejects(applyVerifiedStripeRefund({ ...refund, id: "evt_refund_currency", currency: "EUR" }), /snapshot/);
   } finally {
     restoreEnv(previous);
+    delete process.env.ORBEXA_JOB_DIR;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("shared demo consent does not opt in another job", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-jobs-"));
+  process.env.ORBEXA_JOB_DIR = directory;
+  try {
+    const first = await createJob({
+      locale: "en",
+      slug: "hospital-beds",
+      tier: "autonomous",
+      intake: { opportunity_name: "One" },
+    });
+    await setJobConsent(first.id, true);
+    assert.equal((await readJob(first.id))?.trainingConsent, true);
+    assert.equal(await readConsent(first.tenantId), false);
+    const second = await createJob({
+      locale: "en",
+      slug: "hospital-beds",
+      tier: "autonomous",
+      intake: { opportunity_name: "Two" },
+    });
+    assert.equal(second.trainingConsent, false);
+    const tenant = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const owned = await createJob({
+      locale: "en",
+      slug: "hospital-beds",
+      tier: "autonomous",
+      intake: { opportunity_name: "Owned" },
+      tenantId: tenant,
+    });
+    await setJobConsent(owned.id, true);
+    assert.equal(await readConsent(tenant), true);
+  } finally {
     delete process.env.ORBEXA_JOB_DIR;
     await rm(directory, { recursive: true, force: true });
   }

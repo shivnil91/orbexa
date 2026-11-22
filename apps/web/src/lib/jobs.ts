@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { listingBySlug, packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
+import { packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
+import { readDb } from "./demo-store.ts";
+import { publishedListing, sandboxReply } from "./marketplace.ts";
 import { validateFeedback, type FeedbackInput, type FeedbackKind } from "@orbexa/db/feedback.ts";
 import { validateIntake } from "./intake.ts";
 import {
   checkoutPlan,
   sendStripeTestCheckout,
+  stripeTestNetworkEnabled,
   stripeTestTransport,
   type CheckoutPlan,
   type StripeTransport,
@@ -68,6 +71,11 @@ export type JobRecord = {
   finishedAt: number | null;
   metricsWritten: boolean;
   processedStripeEvents: string[];
+  refunded?: boolean;
+  instructions?: string;
+  sellerId?: string;
+  createdAt?: number;
+  stripeCheckoutUrl?: string;
 };
 
 const locks = new Map<string, Promise<unknown>>();
@@ -108,19 +116,29 @@ export async function createJob(input: {
   slug: string;
   tier: ServiceLevel;
   intake: Record<string, unknown>;
+  tenantId?: string;
 }): Promise<JobRecord> {
-  const listing = listingBySlug(input.slug);
+  const listing = await publishedListing(input.slug);
   if (!listing) {
     throw new Error("listing not found");
   }
   const pack = packFor(listing);
-  validateIntake(pack.intakeSchema, input.intake);
+  const properties = pack.intakeSchema.properties ?? {};
+  const intake: Record<string, unknown> = {};
+  for (const key of Object.keys(properties)) {
+    if (key in input.intake) {
+      intake[key] = input.intake[key];
+    }
+  }
+  validateIntake(pack.intakeSchema, intake);
   const tier = listing.tiers.find((item) => item.serviceLevel === input.tier);
   if (!tier) {
     throw new Error("service level not found");
   }
-  const name = input.intake.opportunity_name;
+  const name = intake.opportunity_name ?? intake.need;
   const transcript = transcriptFor(listing.vertical);
+  const knowledgeText = (listing.knowledge ?? []).map((note) => `${note.name}\n${note.text}`).join("\n");
+  const tenantId = input.tenantId && UUID.test(input.tenantId) ? input.tenantId : DEMO_ORG_ID;
   const job: JobRecord = {
     id: randomUUID(),
     locale: input.locale,
@@ -129,6 +147,9 @@ export async function createJob(input: {
     title: listing.title,
     serviceLevel: tier.serviceLevel,
     opportunityName: typeof name === "string" ? name : "",
+    instructions: [listing.instructions ?? "", knowledgeText].filter((part) => part.length > 0).join("\n\n"),
+    sellerId: listing.sellerId,
+    createdAt: Date.now(),
     currency: tier.currency,
     priceMinor: tier.priceMinor,
     reviewFeeMinor: tier.reviewFeeMinor,
@@ -139,7 +160,7 @@ export async function createJob(input: {
     cancellationCode: tier.cancellationCode,
     payoutRelease: tier.payoutRelease,
     agentVersionId: listing.agentVersionId,
-    tenantId: DEMO_ORG_ID,
+    tenantId,
     payment: null,
     stages: pack.workflow,
     cursor: 0,
@@ -153,7 +174,7 @@ export async function createJob(input: {
         ]
       : [],
     feedback: [],
-    trainingConsent: await readConsent(DEMO_ORG_ID),
+    trainingConsent: tenantId === DEMO_ORG_ID ? false : await readConsent(tenantId),
     approvalSignal: null,
     startedAt: null,
     finishedAt: null,
@@ -186,12 +207,11 @@ function snapshotInput(job: JobRecord) {
   };
 }
 
-function stripeNetworkEnabled(env: NodeJS.ProcessEnv): boolean {
-  const key = env.STRIPE_TEST_SECRET_KEY ?? "";
-  return env.PAYMENT_PROVIDER === "stripe" && key.startsWith("sk_test_") && env.STRIPE_TEST_NETWORK === "1";
-}
-
-export async function payJob(id: string, transport: StripeTransport = stripeTestTransport): Promise<JobRecord> {
+export async function payJob(
+  id: string,
+  transport: StripeTransport = stripeTestTransport,
+  urls?: { successUrl?: string; cancelUrl?: string },
+): Promise<JobRecord> {
   return withLock(id, async () => {
     const job = await readJob(id);
     if (!job) {
@@ -200,9 +220,12 @@ export async function payJob(id: string, transport: StripeTransport = stripeTest
     if (job.status !== "checkout") {
       return job;
     }
+    if (job.refunded) {
+      throw new Error("job is refunded");
+    }
     const input = snapshotInput(job);
     const plan = checkoutPlan(input);
-    if (!stripeNetworkEnabled(process.env)) {
+    if (!stripeTestNetworkEnabled(process.env)) {
       job.payment = plan;
       job.status = "queued";
       await writeJob(job);
@@ -211,8 +234,14 @@ export async function payJob(id: string, transport: StripeTransport = stripeTest
     if (job.payment?.id.startsWith("cs_test_")) {
       return job;
     }
-    const session = await sendStripeTestCheckout(input, process.env, transport);
+    const session = await sendStripeTestCheckout(input, process.env, transport, {
+      ...urls,
+      destinationAccountId: await sellerDestination(job.sellerId),
+    });
     job.payment = { ...plan, mode: "stripe_test", simulated: true, id: session.id };
+    if (session.url) {
+      job.stripeCheckoutUrl = session.url;
+    }
     await writeJob(job);
     return job;
   });
@@ -241,6 +270,13 @@ export async function applyVerifiedStripePayment(event: VerifiedStripeEvent): Pr
     ) {
       throw new Error("amount does not match the order snapshot");
     }
+    if (job.refunded) {
+      if (!seen.includes(event.id)) {
+        job.processedStripeEvents = [...seen, event.id];
+        await writeJob(job);
+      }
+      return job;
+    }
     if (job.status !== "checkout") {
       if (job.payment) {
         return job;
@@ -257,11 +293,60 @@ export async function applyVerifiedStripePayment(event: VerifiedStripeEvent): Pr
   });
 }
 
+export async function applyVerifiedStripeRefund(event: VerifiedStripeEvent): Promise<JobRecord> {
+  if (event.type !== "refund.succeeded" || event.livemode !== false) {
+    throw new Error("event is not a test refund");
+  }
+  if (!Number.isSafeInteger(event.amountMinor) || event.amountMinor <= 0) {
+    throw new Error("refund amount is invalid");
+  }
+  return withLock(event.orderId, async () => {
+    const job = await readJob(event.orderId);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    if (event.currency !== job.currency || event.amountMinor > job.priceMinor) {
+      throw new Error("amount does not match the order snapshot");
+    }
+    const seen = job.processedStripeEvents ?? [];
+    if (seen.includes(event.id)) {
+      return job;
+    }
+    job.refunded = true;
+    job.processedStripeEvents = [...seen, event.id];
+    if (job.status !== "rejected") {
+      job.status = "rejected";
+    }
+    await writeJob(job);
+    return job;
+  });
+}
+
+async function sellerDestination(sellerId: string | undefined): Promise<string | undefined> {
+  if (!sellerId) {
+    return undefined;
+  }
+  try {
+    const db = await readDb();
+    const seller = db.users.find((user) => user.id === sellerId);
+    const accountId = seller?.connect.accountId;
+    if (!seller?.connect.chargesEnabled || !accountId || !/^acct_[A-Za-z0-9]+$/.test(accountId)) {
+      return undefined;
+    }
+    return accountId;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function revealNext(id: string): Promise<JobRecord> {
   return withLock(id, async () => {
     const job = await readJob(id);
     if (!job) {
       throw new Error("job not found");
+    }
+    if (job.refunded || job.status === "rejected" || job.status === "checkout" || !job.payment) {
+      return job;
     }
     if (job.status !== "queued" && job.status !== "running") {
       return job;
@@ -272,6 +357,14 @@ export async function revealNext(id: string): Promise<JobRecord> {
     if (job.cursor >= job.stages.length) {
       job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
       job.finishedAt = Date.now();
+      if (!job.transcript) {
+        job.paragraphs = sandboxReply({
+          name: job.title,
+          instructions: job.instructions ?? "",
+          knowledge: "",
+          need: job.opportunityName,
+        });
+      }
       await writeMetrics(job);
       job.metricsWritten = true;
     }
@@ -288,6 +381,9 @@ export async function recordJobFeedback(
     const job = await readJob(id);
     if (!job) {
       throw new Error("job not found");
+    }
+    if (job.refunded) {
+      throw new Error("job is refunded");
     }
     const buyerSignal = input.kind === "buyer_approve"
       || input.kind === "buyer_edit"
@@ -343,7 +439,7 @@ export async function recordExpertSignal(id: string): Promise<JobRecord> {
     if (!job) {
       throw new Error("job not found");
     }
-    if (job.serviceLevel === "autonomous") {
+    if (job.refunded || job.serviceLevel === "autonomous") {
       return job;
     }
     if (job.status !== "waiting_for_expert") {
@@ -363,7 +459,9 @@ export async function setJobConsent(id: string, granted: boolean): Promise<JobRe
       throw new Error("job not found");
     }
     job.trainingConsent = granted;
-    await writeConsent(job.tenantId, granted);
+    if (job.tenantId !== DEMO_ORG_ID) {
+      await writeConsent(job.tenantId, granted);
+    }
     await writeJob(job);
     return job;
   });
@@ -433,6 +531,42 @@ async function writeMetrics(job: JobRecord): Promise<void> {
   lines.push(JSON.stringify({ kind: "draft", agentVersionId: job.agentVersionId, jobId: job.id }));
   await mkdir(rootDir(), { recursive: true });
   await writeFile(path.join(rootDir(), "invocations.jsonl"), `${lines.join("\n")}\n`, { flag: "a" });
+}
+
+export async function listJobs(): Promise<JobRecord[]> {
+  let names: string[] = [];
+  try {
+    names = await readdir(/*turbopackIgnore: true*/ rootDir());
+  } catch {
+    return [];
+  }
+  const jobs: JobRecord[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) {
+      continue;
+    }
+    const id = name.slice(0, -".json".length);
+    if (!UUID.test(id)) {
+      continue;
+    }
+    const job = await readJob(id);
+    if (job) {
+      jobs.push(job);
+    }
+  }
+  jobs.sort((left, right) => (right.createdAt ?? right.startedAt ?? 0) - (left.createdAt ?? left.startedAt ?? 0));
+  return jobs;
+}
+
+export async function runCounts(): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  for (const job of await listJobs()) {
+    if (job.status === "checkout" || job.status === "queued" || job.status === "running") {
+      continue;
+    }
+    counts[job.listingSlug] = (counts[job.listingSlug] ?? 0) + 1;
+  }
+  return counts;
 }
 
 export function metricsLogPath(): string {
