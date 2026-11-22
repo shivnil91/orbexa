@@ -48,6 +48,8 @@ def test_live_stripe_keys_are_refused_without_echoing_the_secret() -> None:
     assert "should_not_echo" not in str(caught.value)
     with pytest.raises(LiveStripeKeyError):
         gateway_from_env({"LLM_PROVIDER": "fixture", "ANTHROPIC_API_KEY": secret})
+    with pytest.raises(LiveStripeKeyError):
+        refuse_live_stripe_keys({"STRIPE_TEST_SECRET_KEY": "rk_live_example"})
 
 
 def test_fixture_gateway_stays_default_and_live_adapters_need_a_key() -> None:

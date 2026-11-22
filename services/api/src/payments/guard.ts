@@ -1,4 +1,4 @@
-const LIVE_MARKER = "sk_live_";
+const LIVE_MARKERS = ["sk_live_", "rk_live_"];
 
 export class LiveStripeKeyError extends Error {
   constructor(variable: string) {
@@ -9,7 +9,7 @@ export class LiveStripeKeyError extends Error {
 
 export function assertNoLiveStripeKey(env: NodeJS.ProcessEnv): void {
   for (const [key, value] of Object.entries(env)) {
-    if (typeof value === "string" && value.includes(LIVE_MARKER)) {
+    if (typeof value === "string" && LIVE_MARKERS.some((marker) => value.includes(marker))) {
       throw new LiveStripeKeyError(key);
     }
   }

@@ -33,7 +33,7 @@ The WAF on the cell is `AWSManagedRulesCommonRuleSet` from vendor `AWS`, associa
 `app.fulfill_privacy_request` exports or deletes one org in this cell.
 
 - Export returns that org's document text, memory, order amounts, and ledger lines. Another org's chunk text is not in the payload.
-- Delete sets buyer-private and execution bodies, lesson text, messages, and citation quotes to `[redacted]`, revokes lessons whose provenance points at the org, and sets a ledger memo to `[redacted]` without changing `amount_minor`.
+- Delete sets buyer-private and execution bodies, lesson text, messages, and citation quotes to `[redacted]`, drops embeddings for that org, revokes lessons whose provenance points at the org, and sets a ledger memo to `[redacted]` without changing `amount_minor`. The request stays `in_progress` and returns `storage_keys`. The caller overwrites those objects, then calls `app.complete_privacy_request`. A session whose tenant is unset or is a different org cannot export or delete.
 - `access`, `correct`, and `restrict` raise. They are stored and not processed.
 - The function checks `app.current_tenant()` when a tenant is set. A second cell is another database. This function cannot see it. Run the same request in each cell that holds the org. With one cell, one database is the whole story.
 

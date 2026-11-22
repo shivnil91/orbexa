@@ -280,6 +280,49 @@ COMMENT ON VIEW app.agent_version_metrics IS
 
 -- Privacy redaction is the only update allowed on otherwise immutable text.
 -- Amounts, ids, and account codes on the ledger stay put.
+-- The nonce row is inserted only by redact_org, which is not granted to the
+-- app role. Setting app.privacy_nonce from a session does not authorize an update.
+
+CREATE TABLE app.privacy_nonces (
+  nonce text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+REVOKE ALL ON TABLE app.privacy_nonces FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app.privacy_redact_authorized()
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public, app
+AS $$
+DECLARE
+  ticket text;
+BEGIN
+  ticket := NULLIF(current_setting('app.privacy_nonce', true), '');
+  IF ticket IS NULL THEN
+    RETURN false;
+  END IF;
+  RETURN EXISTS (SELECT 1 FROM app.privacy_nonces WHERE nonce = ticket);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION app.privacy_redact_authorized() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.privacy_redact_authorized() TO orbexa_app, orbexa_worker;
+
+CREATE OR REPLACE FUNCTION app.assert_privacy_tenant(p_org uuid)
+RETURNS void
+LANGUAGE plpgsql
+STABLE
+SET search_path = pg_catalog, public, app
+AS $$
+BEGIN
+  IF p_org IS NULL OR app.current_tenant() IS DISTINCT FROM p_org THEN
+    RAISE EXCEPTION 'privacy request is outside the session tenant';
+  END IF;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION app.chunks_are_immutable()
 RETURNS trigger
@@ -287,7 +330,7 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog, public, app
 AS $$
 BEGIN
-  IF current_setting('app.privacy_redact', true) = '1'
+  IF app.privacy_redact_authorized()
      AND NEW.body = '[redacted]'
      AND NEW.page IS NOT DISTINCT FROM OLD.page
      AND NEW.sheet IS NOT DISTINCT FROM OLD.sheet
@@ -332,7 +375,7 @@ BEGIN
   IF current_setting('app.purge', true) = '1' AND NEW.body = '[purged]' THEN
     RETURN NEW;
   END IF;
-  IF current_setting('app.privacy_redact', true) = '1' AND NEW.body = '[redacted]' THEN
+  IF app.privacy_redact_authorized() AND NEW.body = '[redacted]' THEN
     RETURN NEW;
   END IF;
   RAISE EXCEPTION 'memory body is immutable outside purge';
@@ -348,7 +391,7 @@ BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'ledger_entries is append-only' USING ERRCODE = '55000';
   END IF;
-  IF current_setting('app.privacy_redact', true) = '1'
+  IF app.privacy_redact_authorized()
      AND NEW.memo = '[redacted]'
      AND NEW.amount_minor IS NOT DISTINCT FROM OLD.amount_minor
      AND NEW.currency IS NOT DISTINCT FROM OLD.currency
@@ -379,7 +422,7 @@ BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'claim_citations is append-only' USING ERRCODE = '55000';
   END IF;
-  IF current_setting('app.privacy_redact', true) = '1'
+  IF app.privacy_redact_authorized()
      AND NEW.quote = '[redacted]'
      AND NEW.claim_id IS NOT DISTINCT FROM OLD.claim_id
      AND NEW.chunk_id IS NOT DISTINCT FROM OLD.chunk_id
@@ -406,7 +449,7 @@ BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'job_messages is append-only' USING ERRCODE = '55000';
   END IF;
-  IF current_setting('app.privacy_redact', true) = '1'
+  IF app.privacy_redact_authorized()
      AND NEW.body = '[redacted]'
      AND NEW.tenant_id IS NOT DISTINCT FROM OLD.tenant_id
      AND NEW.job_id IS NOT DISTINCT FROM OLD.job_id
@@ -434,9 +477,7 @@ AS $$
 DECLARE
   result jsonb;
 BEGIN
-  IF p_org IS NULL THEN
-    RAISE EXCEPTION 'org is required';
-  END IF;
+  PERFORM app.assert_privacy_tenant(p_org);
   SELECT jsonb_build_object(
     'org_id', p_org,
     'documents', COALESCE((
@@ -455,9 +496,14 @@ BEGIN
     'memory', COALESCE((
       SELECT jsonb_agg(body ORDER BY created_at)
       FROM memory_items
-      WHERE tenant_id = p_org OR provenance_id IN (
-        SELECT id FROM memory_provenance WHERE tenant_id = p_org
-      )
+      WHERE tenant_id = p_org
+        OR (
+          tenant_id IS NULL
+          AND scope = 'approved_reusable'
+          AND provenance_id IN (
+            SELECT id FROM memory_provenance WHERE tenant_id = p_org
+          )
+        )
     ), '[]'::jsonb),
     'orders', COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
@@ -491,11 +537,12 @@ SET search_path = pg_catalog, public, app
 AS $$
 DECLARE
   keys jsonb;
+  ticket text;
 BEGIN
-  IF p_org IS NULL THEN
-    RAISE EXCEPTION 'org is required';
-  END IF;
-  PERFORM set_config('app.privacy_redact', '1', true);
+  PERFORM app.assert_privacy_tenant(p_org);
+  ticket := gen_random_uuid()::text;
+  INSERT INTO app.privacy_nonces (nonce) VALUES (ticket);
+  PERFORM set_config('app.privacy_nonce', ticket, true);
   SELECT COALESCE(jsonb_agg(DISTINCT storage_key), '[]'::jsonb) INTO keys
   FROM (
     SELECT storage_key FROM documents WHERE tenant_id = p_org
@@ -524,6 +571,7 @@ BEGIN
 
   UPDATE memory_items
   SET body = '[redacted]',
+      content_hash = '017ad73325fcf108a972edac618f9edfc957c5b1de10f8b371b0a8bfa4f59e2d',
       deleted_at = COALESCE(deleted_at, now())
   WHERE tenant_id = p_org
     AND scope IN ('execution', 'buyer_private')
@@ -531,12 +579,26 @@ BEGIN
 
   UPDATE memory_items
   SET body = '[redacted]',
+      content_hash = '017ad73325fcf108a972edac618f9edfc957c5b1de10f8b371b0a8bfa4f59e2d',
       status = 'revoked',
       consent_revoked_at = COALESCE(consent_revoked_at, now()),
       deleted_at = COALESCE(deleted_at, now())
-  WHERE scope = 'approved_reusable'
+  WHERE tenant_id IS NULL
+    AND scope = 'approved_reusable'
     AND provenance_id IN (SELECT id FROM memory_provenance WHERE tenant_id = p_org)
     AND body IS DISTINCT FROM '[redacted]';
+
+  DELETE FROM chunk_embeddings WHERE tenant_id = p_org;
+  DELETE FROM memory_embeddings
+  WHERE memory_item_id IN (
+    SELECT id FROM memory_items
+    WHERE tenant_id = p_org
+      OR (
+        tenant_id IS NULL
+        AND scope = 'approved_reusable'
+        AND provenance_id IN (SELECT id FROM memory_provenance WHERE tenant_id = p_org)
+      )
+  );
 
   UPDATE lesson_candidates
   SET proposed_text = '[redacted]',
@@ -576,6 +638,8 @@ BEGIN
     AND memo IS NOT NULL
     AND memo IS DISTINCT FROM '[redacted]';
 
+  DELETE FROM app.privacy_nonces WHERE nonce = ticket;
+  PERFORM set_config('app.privacy_nonce', '', true);
   RETURN keys;
 END;
 $$;
@@ -589,6 +653,7 @@ AS $$
 DECLARE
   req privacy_requests%ROWTYPE;
   exported jsonb;
+  keys jsonb;
 BEGIN
   SELECT * INTO req FROM privacy_requests WHERE id = p_request FOR UPDATE;
   IF NOT FOUND THEN
@@ -597,19 +662,61 @@ BEGIN
   IF req.org_id IS NULL THEN
     RAISE EXCEPTION 'privacy request needs an org';
   END IF;
+  PERFORM app.assert_privacy_tenant(req.org_id);
   IF req.status = 'completed' THEN
     RAISE EXCEPTION 'privacy request is already completed';
   END IF;
-  IF app.current_tenant() IS NOT NULL AND app.current_tenant() IS DISTINCT FROM req.org_id THEN
-    RAISE EXCEPTION 'privacy request is outside the session tenant';
+  IF req.status <> 'received' THEN
+    RAISE EXCEPTION 'privacy request cannot be processed from status %', req.status;
   END IF;
   IF req.kind = 'export' THEN
     exported := app.export_org(req.org_id);
+    UPDATE privacy_requests
+    SET status = 'completed',
+        completed_at = now()
+    WHERE id = p_request;
   ELSIF req.kind = 'delete' THEN
-    PERFORM app.redact_org(req.org_id);
-    exported := app.export_org(req.org_id);
+    keys := app.redact_org(req.org_id);
+    exported := app.export_org(req.org_id) || jsonb_build_object(
+      'storage_keys', keys,
+      'status', 'in_progress'
+    );
+    UPDATE privacy_requests
+    SET status = 'in_progress'
+    WHERE id = p_request;
   ELSE
     RAISE EXCEPTION 'privacy kind % is not processed by this cell drill', req.kind;
+  END IF;
+  INSERT INTO audit_log (actor_role, tenant_id, home_region, action, resource_type, resource_id, metadata)
+  VALUES (
+    'privacy',
+    req.org_id,
+    req.home_region,
+    CASE WHEN req.kind = 'delete' THEN 'privacy_delete_started' ELSE 'privacy_export' END,
+    'privacy_requests',
+    req.id,
+    jsonb_build_object('kind', req.kind)
+  );
+  RETURN exported;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app.complete_privacy_request(p_request uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, app
+AS $$
+DECLARE
+  req privacy_requests%ROWTYPE;
+BEGIN
+  SELECT * INTO req FROM privacy_requests WHERE id = p_request FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'privacy request not found';
+  END IF;
+  PERFORM app.assert_privacy_tenant(req.org_id);
+  IF req.kind <> 'delete' OR req.status <> 'in_progress' THEN
+    RAISE EXCEPTION 'privacy delete is not ready to complete';
   END IF;
   UPDATE privacy_requests
   SET status = 'completed',
@@ -620,24 +727,24 @@ BEGIN
     'privacy',
     req.org_id,
     req.home_region,
-    'privacy_' || req.kind,
+    'privacy_delete',
     'privacy_requests',
     req.id,
-    jsonb_build_object('kind', req.kind)
+    jsonb_build_object('kind', 'delete')
   );
-  RETURN exported;
 END;
 $$;
 
 COMMENT ON FUNCTION app.fulfill_privacy_request IS
-  'Export or delete for one org in this cell. Delete redacts buyer-private text and leaves ledger amounts. It does not reach another cell. access, correct, and restrict are recorded and not processed here.';
+  'Export completes immediately. Delete redacts rows, returns storage_keys, and stays in_progress until complete_privacy_request. The session tenant must match. It does not reach another cell.';
 
 REVOKE ALL ON FUNCTION app.export_org(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.redact_org(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.fulfill_privacy_request(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION app.export_org(uuid) TO orbexa_app;
-GRANT EXECUTE ON FUNCTION app.redact_org(uuid) TO orbexa_app;
+REVOKE ALL ON FUNCTION app.complete_privacy_request(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.assert_privacy_tenant(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.fulfill_privacy_request(uuid) TO orbexa_app;
+GRANT EXECUTE ON FUNCTION app.complete_privacy_request(uuid) TO orbexa_app;
 GRANT EXECUTE ON FUNCTION app.consume_rate_limit(uuid) TO orbexa_app, orbexa_worker;
 GRANT SELECT, INSERT ON rate_limit_events TO orbexa_app, orbexa_worker;
 GRANT SELECT ON app.agent_version_metrics TO orbexa_app, orbexa_finance;

@@ -11,5 +11,5 @@ class LiveStripeKeyError(RuntimeError):
 
 def refuse_live_stripe_keys(env: Mapping[str, str]) -> None:
     for key, value in env.items():
-        if value and "sk_live_" in value:
+        if value and ("sk_live_" in value or "rk_live_" in value):
             raise LiveStripeKeyError(f"refusing to start: {key} contains a live Stripe secret")

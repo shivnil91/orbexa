@@ -29,6 +29,10 @@ test("startup refuses a live Stripe key and does not echo it", () => {
     () => paymentProviderFromEnv({ PAYMENT_PROVIDER: "fake", OPENAI_API_KEY: secret }),
     /refusing to start/,
   );
+  assert.throws(
+    () => assertNoLiveStripeKey({ STRIPE_TEST_SECRET_KEY: "rk_live_example" }),
+    /STRIPE_TEST_SECRET_KEY/,
+  );
 });
 
 test("stripe test mode is selected only by a test key and does not call the network", async () => {
@@ -111,6 +115,8 @@ test("a stripe test webhook signature is checked and the split is not invented",
       throw new Error("network");
     },
   });
+  const sign = (payload: string, stamp = String(Math.floor(Date.now() / 1000))) =>
+    `t=${stamp},v1=${createHmac("sha256", "whsec_test_local").update(`${stamp}.${payload}`).digest("hex")}`;
   const body = JSON.stringify({
     id: "evt_test_1",
     type: "checkout.session.completed",
@@ -118,6 +124,7 @@ test("a stripe test webhook signature is checked and the split is not invented",
       object: {
         amount_total: 1000,
         currency: "usd",
+        livemode: false,
         client_reference_id: "order-1",
         metadata: {
           platform_fee_minor: "150",
@@ -128,16 +135,49 @@ test("a stripe test webhook signature is checked and the split is not invented",
       },
     },
   });
-  const timestamp = "1700000000";
-  const signature = createHmac("sha256", "whsec_test_local").update(`${timestamp}.${body}`).digest("hex");
-  const event = provider.verifyWebhook(body, `t=${timestamp},v1=${signature}`);
+  const event = provider.verifyWebhook(body, sign(body));
+  assert.equal(event.type, "payment.captured");
   assert.equal(event.amountMinor, 1000n);
   assert.equal(event.platformFeeMinor, 150n);
-  assert.throws(() => provider.verifyWebhook(body, "t=1,v1=00"), /signature/);
-  assert.throws(
-    () => provider.verifyWebhook(JSON.stringify({ id: "evt_test_2", type: "checkout.session.completed", data: { object: { amount_total: 1, currency: "usd" } } }), `t=${timestamp},v1=${createHmac("sha256", "whsec_test_local").update(`${timestamp}.${JSON.stringify({ id: "evt_test_2", type: "checkout.session.completed", data: { object: { amount_total: 1, currency: "usd" } } })}`).digest("hex")}`),
-    /ledger split/,
-  );
+  const nowStamp = String(Math.floor(Date.now() / 1000));
+  assert.throws(() => provider.verifyWebhook(body, `t=${nowStamp},v1=00`), /signature/);
+  const unsignedSplit = JSON.stringify({
+    id: "evt_test_2",
+    type: "checkout.session.completed",
+    data: { object: { amount_total: 1, currency: "usd", livemode: false } },
+  });
+  assert.throws(() => provider.verifyWebhook(unsignedSplit, sign(unsignedSplit)), /ledger split/);
+  const failed = JSON.stringify({
+    id: "evt_test_3",
+    type: "payment_intent.payment_failed",
+    data: { object: { amount: 1000, currency: "usd", livemode: false, metadata: {
+      platform_fee_minor: "0", creator_royalty_minor: "0", review_fee_minor: "0", tax_minor: "0",
+    } } },
+  });
+  assert.throws(() => provider.verifyWebhook(failed, sign(failed)), /not a capture or refund/);
+  const refund = JSON.stringify({
+    id: "evt_test_4",
+    type: "charge.refunded",
+    data: { object: {
+      amount: 1000,
+      amount_refunded: 250,
+      currency: "usd",
+      livemode: false,
+      metadata: {
+        platform_fee_minor: "0", creator_royalty_minor: "250", review_fee_minor: "0", tax_minor: "0",
+      },
+    } },
+  });
+  assert.equal(provider.verifyWebhook(refund, sign(refund)).amountMinor, 250n);
+  const live = JSON.stringify({
+    id: "evt_test_5",
+    type: "checkout.session.completed",
+    data: { object: { amount_total: 1, currency: "usd", livemode: true, metadata: {
+      platform_fee_minor: "0", creator_royalty_minor: "1", review_fee_minor: "0", tax_minor: "0",
+    } } },
+  });
+  assert.throws(() => provider.verifyWebhook(live, sign(live)), /live mode/);
+  assert.throws(() => provider.verifyWebhook(body, sign(body, "1700000000")), /timestamp/);
 });
 
 test("versioned object restore reads the prior chunk and redaction removes it", () => {

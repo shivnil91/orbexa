@@ -87,6 +87,11 @@ export function createStripeTestProvider(options: {
       if (!timestamp || !expected) {
         throw new Error("webhook signature mismatch");
       }
+      const stamp = Number(timestamp);
+      const now = Math.floor(Date.now() / 1000);
+      if (!Number.isFinite(stamp) || Math.abs(now - stamp) > 300) {
+        throw new Error("webhook timestamp is outside the allowed window");
+      }
       const digest = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
       const left = Buffer.from(digest);
       const right = Buffer.from(expected);
@@ -99,10 +104,33 @@ export function createStripeTestProvider(options: {
         data?: { object?: Record<string, unknown> };
       };
       const object = parsed.data?.object ?? {};
+      if (object.livemode === true) {
+        throw new Error("live mode webhook rejected");
+      }
       const metadata = (object.metadata ?? {}) as Record<string, string>;
-      const amount = object.amount_total ?? object.amount;
-      if (typeof parsed.id !== "string" || typeof amount !== "number") {
-        throw new Error("Stripe test webhook is missing an id or amount");
+      const captures = new Set([
+        "checkout.session.completed",
+        "payment_intent.succeeded",
+        "charge.succeeded",
+      ]);
+      const refunds = new Set(["charge.refunded", "refund.updated"]);
+      const eventType = captures.has(parsed.type ?? "")
+        ? "payment.captured"
+        : refunds.has(parsed.type ?? "")
+          ? "refund.succeeded"
+          : null;
+      if (eventType === null || typeof parsed.id !== "string") {
+        throw new Error("Stripe test webhook type is not a capture or refund");
+      }
+      const rawAmount = eventType === "refund.succeeded"
+        ? object.amount_refunded ?? object.amount
+        : object.amount_total ?? object.amount;
+      if (typeof rawAmount !== "number" || !Number.isInteger(rawAmount) || rawAmount < 0) {
+        throw new Error("Stripe test webhook amount is not a non-negative integer");
+      }
+      const currency = String(object.currency ?? "");
+      if (!/^[A-Za-z]{3}$/.test(currency)) {
+        throw new Error("Stripe test webhook currency is invalid");
       }
       const required = ["platform_fee_minor", "creator_royalty_minor", "review_fee_minor", "tax_minor"] as const;
       if (required.some((field) => metadata[field] === undefined)) {
@@ -110,10 +138,10 @@ export function createStripeTestProvider(options: {
       }
       return {
         id: parsed.id,
-        type: parsed.type === "charge.refunded" ? "refund.succeeded" : "payment.captured",
+        type: eventType,
         orderId: String(object.client_reference_id ?? metadata.order_id ?? ""),
-        amountMinor: BigInt(amount),
-        currency: String(object.currency ?? "").toUpperCase(),
+        amountMinor: BigInt(rawAmount),
+        currency: currency.toUpperCase(),
         platformFeeMinor: BigInt(metadata.platform_fee_minor),
         creatorRoyaltyMinor: BigInt(metadata.creator_royalty_minor),
         reviewFeeMinor: BigInt(metadata.review_fee_minor),

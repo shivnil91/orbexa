@@ -576,7 +576,7 @@ test("bm25 uses the same retrieve_chunks signature and can change rank", async (
       'page', 1
     ) RETURNING id
   `);
-  const noisy = `${"regulatory ".repeat(30)}xylophone ${"padding ".repeat(40)}`;
+  const noisy = "regulatory xylophone ".repeat(25);
   const repeated = await db.query<{ id: string }>(
     `INSERT INTO document_chunks (
       tenant_id, home_region, document_id, job_id, chunker_version, chunk_index, kind, body,
@@ -598,17 +598,25 @@ test("bm25 uses the same retrieve_chunks signature and can change rank", async (
     { tenant_id: buyerA, access: "org", job_id: jobA, user_id: userA, lexical_scorer: "bm25" },
     query,
   );
-  const best = (rows: Array<{ id: string; lexical_rank: number | null }>, id: string) =>
-    rows.find((row) => row.id === id)?.lexical_rank;
-  const measured = {
-    bm25Certificate: Number(best(bm25.rows, certificate.rows[0].id)),
-    bm25Repeated: Number(best(bm25.rows, repeated.rows[0].id)),
-    tsCertificate: Number(best(tsRank.rows, certificate.rows[0].id)),
-    tsRepeated: Number(best(tsRank.rows, repeated.rows[0].id)),
-  };
-  assert.notEqual(measured.bm25Certificate, measured.tsCertificate, JSON.stringify(measured));
-  assert.ok(measured.bm25Certificate >= 1, JSON.stringify(measured));
-  assert.ok(measured.tsRepeated >= 1, JSON.stringify(measured));
+  const scores = await db.query<{
+    bm25_short: string;
+    bm25_long: string;
+    ts_short: string;
+    ts_long: string;
+  }>(`
+    SELECT
+      app.bm25_job_score('${certificate.rows[0].id}', 'regulatory xylophone', '${buyerA}', '${jobA}')::text AS bm25_short,
+      app.bm25_job_score('${repeated.rows[0].id}', 'regulatory xylophone', '${buyerA}', '${jobA}')::text AS bm25_long,
+      ts_rank_cd((SELECT search_vector FROM document_chunks WHERE id = '${certificate.rows[0].id}'), plainto_tsquery('simple', 'regulatory xylophone'))::text AS ts_short,
+      ts_rank_cd((SELECT search_vector FROM document_chunks WHERE id = '${repeated.rows[0].id}'), plainto_tsquery('simple', 'regulatory xylophone'))::text AS ts_long
+  `);
+  const measured = scores.rows[0];
+  const bm25Ratio = Number(measured.bm25_long) / Number(measured.bm25_short);
+  const tsRatio = Number(measured.ts_long) / Number(measured.ts_short);
+  assert.equal(bm25.rows.some((row) => row.id === certificate.rows[0].id), true);
+  assert.equal(tsRank.rows.some((row) => row.id === certificate.rows[0].id), true);
+  assert.ok(tsRatio > 10, JSON.stringify(measured));
+  assert.ok(bm25Ratio < 3, JSON.stringify(measured));
   await assert.rejects(
     asApp(
       { tenant_id: buyerA, access: "org", job_id: jobA, user_id: userA, lexical_scorer: "parade" },
@@ -816,11 +824,37 @@ test("privacy export and delete keep ledger amounts and drop fixture text", asyn
   await db.exec(
     `UPDATE ledger_transactions SET posted = true, posted_at = now() WHERE id = '${txn.rows[0].id}'`,
   );
+  await db.exec(`
+    INSERT INTO chunk_embeddings (chunk_id, tenant_id, home_region, model_id, embedding)
+    VALUES ('${chunk.rows[0].id}', '${privacyOrg}', 'local', '${modelId}', ${ones})
+  `);
   const exportRequest = await db.query<{ id: string }>(`
     INSERT INTO privacy_requests (org_id, home_region, kind, status, due_at)
     VALUES ('${privacyOrg}', 'local', 'export', 'received', now() + interval '30 days')
     RETURNING id
   `);
+  await assert.rejects(
+    db.query("SELECT app.fulfill_privacy_request($1)", [exportRequest.rows[0].id]),
+    /outside the session tenant/i,
+  );
+  await db.query("SELECT set_config('app.tenant_id', $1, false)", [buyerB]);
+  await assert.rejects(
+    db.query("SELECT app.fulfill_privacy_request($1)", [exportRequest.rows[0].id]),
+    /outside the session tenant/i,
+  );
+  await db.query("SELECT set_config('app.tenant_id', $1, false)", [buyerA]);
+  await db.query("SELECT set_config('app.job_id', $1, false)", [jobA]);
+  await db.query("SELECT set_config('app.access', 'org', false)");
+  await db.query("SELECT set_config('app.user_id', $1, false)", [userA]);
+  await db.query("SELECT set_config('app.privacy_nonce', 'forged', false)");
+  await db.exec("SET ROLE orbexa_app");
+  await assert.rejects(
+    db.query("UPDATE document_chunks SET body = '[redacted]' WHERE id = $1", [chunkA]),
+    /immutable|privacy|permission/i,
+  );
+  await db.exec("RESET ROLE");
+  await db.exec("RESET ALL");
+  await db.query("SELECT set_config('app.tenant_id', $1, false)", [privacyOrg]);
   const exported = await db.query<{ payload: string }>(
     "SELECT app.fulfill_privacy_request($1)::text AS payload",
     [exportRequest.rows[0].id],
@@ -839,6 +873,17 @@ test("privacy export and delete keep ledger amounts and drop fixture text", asyn
   );
   assert.equal(deleted.rows[0].payload.includes(marker), false);
   assert.match(deleted.rows[0].payload, /4242/);
+  assert.match(deleted.rows[0].payload, /in_progress/);
+  assert.match(deleted.rows[0].payload, new RegExp(`${privacyOrg}/local/tender.pdf`));
+  const during = await db.query<{ status: string }>(
+    `SELECT status FROM privacy_requests WHERE id = '${deleteRequest.rows[0].id}'`,
+  );
+  assert.equal(during.rows[0].status, "in_progress");
+  const vectors = await db.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM chunk_embeddings WHERE tenant_id = '${privacyOrg}'`,
+  );
+  assert.equal(vectors.rows[0].count, "0");
+  await db.query("SELECT app.complete_privacy_request($1)", [deleteRequest.rows[0].id]);
   const chunkBody = await db.query<{ body: string }>(
     `SELECT body FROM document_chunks WHERE id = '${chunk.rows[0].id}'`,
   );
@@ -869,6 +914,7 @@ test("privacy export and delete keep ledger amounts and drop fixture text", asyn
     db.query("SELECT app.fulfill_privacy_request($1)", [deleteRequest.rows[0].id]),
     /already completed/i,
   );
+  await db.exec("RESET ALL");
 });
 
 test("a logical snapshot restore reads the chunk and records a timing", async () => {
