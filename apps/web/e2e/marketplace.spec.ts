@@ -6,6 +6,14 @@ async function expectAccessible(page: Page) {
   expect(result.violations).toEqual([]);
 }
 
+async function signOut(page: Page) {
+  const button = page.getByRole("button", { name: "Sign out" });
+  if (!(await button.isVisible())) {
+    await page.locator("summary").click();
+  }
+  await button.click();
+}
+
 async function noOverflow(page: Page) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
   expect(overflow).toBe(false);
@@ -49,7 +57,7 @@ test("seller publishes, buyer hires, and admin can hide the listing", async ({ p
 
   await page.goto(`/en/listings?q=${encodeURIComponent(stamp)}`);
   await expect(page.getByRole("heading", { name: skill })).toBeVisible();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
 
   await page.goto("/en/register?role=buyer");
   await page.getByLabel("Name").fill("Buyer Example");
@@ -76,7 +84,7 @@ test("seller publishes, buyer hires, and admin can hide the listing", async ({ p
 
   await page.goto("/en/orders");
   await expect(page.getByRole("heading", { level: 2, name: skill })).toBeVisible();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
 
   await page.goto("/en/sign-in");
   await page.getByLabel("Email").fill(sellerEmail);
@@ -88,7 +96,7 @@ test("seller publishes, buyer hires, and admin can hide the listing", async ({ p
   await expect(page.getByText("You keep 80%")).toBeVisible();
   await expect(page.getByText(skill).first()).toBeVisible();
   await expect(page.getByText("Accepted").first()).toBeVisible();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
 
   await page.goto("/en/register");
   await page.getByLabel("Name").fill("Operator Example");

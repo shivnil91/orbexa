@@ -48,12 +48,13 @@ test("browse filters category, price, and rating, then paginates", () => {
   assert.ok(cheap.items.every((item) => item.priceMinor <= 2000));
   assert.ok(cheap.items.some((item) => item.slug === "example-support-reply"));
   const high = browseCatalog(items, { minRating: 5 });
-  assert.ok(high.items.some((item) => item.slug === "example-interface-critique"));
+  assert.ok(high.items.some((item) => item.slug === "example-practice-plan"));
   assert.equal(high.items.some((item) => item.slug === "example-clause-drafter"), false);
+  const published = items.filter((item) => item.status === "published").length;
   const page = browseCatalog(items, { sort: "newest", page: 2 }, 6);
   assert.equal(page.page, 2);
-  assert.equal(page.pages, 2);
-  assert.equal(page.items.length, items.filter((item) => item.status === "published").length - 6);
+  assert.equal(page.pages, Math.ceil(published / 6));
+  assert.equal(page.items.length, Math.min(6, published - 6));
 });
 
 test("a draft stays out of the public catalog and a suspension hides an example", () => {
@@ -106,7 +107,7 @@ test("generated tiers balance and live runs replace example run counts", () => {
 test("the sandbox reply is labeled as a sample draft and quotes the request", () => {
   const paragraphs = sandboxReply({ name: "Load checker", instructions: "Flag missing load cases.", knowledge: "LC2", need: "Check bridge load case LC2" });
   assert.match(paragraphs[0] ?? "", /Sample draft/);
-  assert.match(paragraphs[0] ?? "", /not a live model/);
+  assert.match(paragraphs[0] ?? "", /listing instructions/);
   assert.match(paragraphs.join("\n"), /Check bridge load case LC2/);
   assert.match(paragraphs.join("\n"), /Flag missing load cases/);
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { LiveSample } from "@/components/draft-tools";
 import { SubmitButton } from "@/components/submit-button";
 import { inputClass } from "@/components/styles";
 type SkillDraft = {
@@ -73,6 +74,7 @@ export function PublishForm({
           <h3 className="font-semibold">{labels.sample}</h3>
           <p className="mt-2 text-sm leading-6">{exampleBody}</p>
         </div>
+        <LiveSample instructions={instructions} name={name} sample={`Show a sample for a buyer who needs this: ${name}`} />
       </aside>
       <section className="grid gap-4">
         <h2 className="text-xl font-semibold">{labels.drafted}</h2>

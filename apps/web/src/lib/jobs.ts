@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
 import { readDb } from "./demo-store.ts";
+import { draftDeliverable, modelConfigured } from "./model.ts";
 import { publishedListing, sandboxReply } from "./marketplace.ts";
 import { validateFeedback, type FeedbackInput, type FeedbackKind } from "@orbexa/db/feedback.ts";
 import { validateIntake } from "./intake.ts";
@@ -72,6 +73,10 @@ export type JobRecord = {
   metricsWritten: boolean;
   processedStripeEvents: string[];
   refunded?: boolean;
+  modelDelivery?: boolean;
+  modelError?: "timeout" | "cap" | "provider" | "empty";
+  inputTokens?: number;
+  outputTokens?: number;
   instructions?: string;
   sellerId?: string;
   createdAt?: number;
@@ -230,15 +235,20 @@ export async function payJob(
       job.status = "queued";
       job.startedAt = Date.now();
       if (!job.transcript) {
-        job.cursor = job.stages.length;
-        job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
-        job.finishedAt = Date.now();
-        job.paragraphs = sandboxReply({
-          name: job.title,
-          instructions: job.instructions ?? "",
-          knowledge: "",
-          need: job.opportunityName,
-        });
+        if (modelConfigured()) {
+          job.status = "running";
+          job.modelDelivery = true;
+        } else {
+          job.cursor = job.stages.length;
+          job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
+          job.finishedAt = Date.now();
+          job.paragraphs = sandboxReply({
+            name: job.title,
+            instructions: job.instructions ?? "",
+            knowledge: "",
+            need: job.opportunityName,
+          });
+        }
       }
       await writeJob(job);
       return job;
@@ -543,6 +553,56 @@ async function writeMetrics(job: JobRecord): Promise<void> {
   lines.push(JSON.stringify({ kind: "draft", agentVersionId: job.agentVersionId, jobId: job.id }));
   await mkdir(rootDir(), { recursive: true });
   await writeFile(path.join(rootDir(), "invocations.jsonl"), `${lines.join("\n")}\n`, { flag: "a" });
+}
+
+export async function deliverPaidDraft(id: string): Promise<JobRecord> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    if (job.transcript || job.refunded || job.status === "checkout" || !job.payment || !job.modelDelivery) {
+      return job;
+    }
+    if (job.paragraphs.length > 0) {
+      return job;
+    }
+    const outcome = await draftDeliverable({
+      name: job.title,
+      instructions: job.instructions ?? "",
+      knowledge: "",
+      need: job.opportunityName,
+    });
+    if (!outcome.ok) {
+      job.modelError = outcome.error;
+      job.refunded = true;
+      job.status = "rejected";
+      job.finishedAt = Date.now();
+      await writeJob(job);
+      return job;
+    }
+    job.paragraphs = outcome.paragraphs;
+    job.inputTokens = outcome.inputTokens;
+    job.outputTokens = outcome.outputTokens;
+    job.cursor = job.stages.length;
+    job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
+    job.finishedAt = Date.now();
+    await writeJob(job);
+    return job;
+  });
+}
+
+export async function refundUnreleasedJob(id: string): Promise<JobRecord | null> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job || job.refunded || job.status === "accepted" || job.status === "checkout" || !job.payment) {
+      return job;
+    }
+    job.refunded = true;
+    job.status = "rejected";
+    await writeJob(job);
+    return job;
+  });
 }
 
 export async function listJobs(): Promise<JobRecord[]> {

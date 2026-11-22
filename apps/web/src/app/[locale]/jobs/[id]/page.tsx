@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
+import { DraftActions, DraftPoll } from "@/components/draft-tools";
 import { EvidenceMatrix } from "@/components/evidence-matrix";
 import { Notice } from "@/components/notice";
 import { RunStream } from "@/components/run-stream";
@@ -40,6 +41,8 @@ export default async function RunPage({
   const error = messageFor(locale, query.error);
   const transcript = job.transcript;
   const ready = !transcript && job.paragraphs.length > 0 && job.cursor >= job.stages.length;
+  const waitingOnModel = Boolean(job.modelDelivery) && job.paragraphs.length === 0 && !job.refunded && job.status === "running";
+  const draftText = job.paragraphs.join("\n\n");
   const matrixReady = job.cursor >= 2 && transcript;
   const claimsReady = job.cursor >= 3 && transcript;
   return (
@@ -56,10 +59,20 @@ export default async function RunPage({
           {t(locale, "run.unpaid")} <Link className="underline" href={`/${locale}/checkout?job=${job.id}`}>{t(locale, "run.return")}</Link>
         </Notice>
       ) : null}
+      {job.refunded && job.modelError ? (
+        <div className="grid gap-3">
+          <Notice tone="error">{t(locale, "run.failed")}</Notice>
+          <p className="text-sm leading-6">{t(locale, "run.refunded")}</p>
+        </div>
+      ) : null}
+      {waitingOnModel ? <DraftPoll failed={t(locale, "run.failed")} jobId={job.id} pending={t(locale, "run.working")} /> : null}
       {ready ? (
         <section className="rounded-2xl border border-line bg-surface p-5">
           <h2 className="text-xl font-semibold">{job.title}</h2>
           {job.paragraphs.map((paragraph) => <p key={paragraph} className="mt-3 leading-7">{paragraph}</p>)}
+          <div className="mt-5">
+            <DraftActions filename={`${job.title.slice(0, 40).replace(/[^\w.-]+/g, "-") || "draft"}.txt`} text={draftText} />
+          </div>
         </section>
       ) : (
         <>

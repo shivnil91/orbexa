@@ -8,6 +8,7 @@ import {
   applyVerifiedStripePayment,
   applyVerifiedStripeRefund,
   createJob,
+  deliverPaidDraft,
   payJob,
   readConsent,
   readJob,
@@ -279,6 +280,51 @@ test("a paid everyday job returns the draft without another step", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+});
+
+test("a model-backed job waits for the provider and refunds when it fails", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-jobs-"));
+  const previous = {
+    provider: process.env.PAYMENT_PROVIDER,
+    key: process.env.STRIPE_TEST_SECRET_KEY,
+    network: process.env.STRIPE_TEST_NETWORK,
+    webhook: process.env.STRIPE_TEST_WEBHOOK_SECRET,
+    anthropic: process.env.ANTHROPIC_API_KEY,
+  };
+  const originalFetch = globalThis.fetch;
+  process.env.ORBEXA_JOB_DIR = directory;
+  delete process.env.PAYMENT_PROVIDER;
+  delete process.env.STRIPE_TEST_SECRET_KEY;
+  delete process.env.STRIPE_TEST_NETWORK;
+  delete process.env.STRIPE_TEST_WEBHOOK_SECRET;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test-key-not-a-secret-value";
+  globalThis.fetch = (async () => {
+    throw new Error("provider down");
+  }) as typeof fetch;
+  try {
+    const job = await createJob({
+      locale: "en",
+      slug: "example-support-reply",
+      tier: "autonomous",
+      intake: { need: "Draft a calm support reply" },
+    });
+    const paid = await payJob(job.id);
+    assert.equal(paid.modelDelivery, true);
+    assert.equal(paid.status, "running");
+    assert.equal(paid.paragraphs.length, 0);
+    const failed = await deliverPaidDraft(paid.id);
+    assert.equal(failed.refunded, true);
+    assert.equal(failed.modelError, "provider");
+    assert.equal(JSON.stringify(failed).includes("sk-ant-test"), false);
+    assert.equal(JSON.stringify(failed).includes("Draft a calm support reply"), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous.anthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previous.anthropic;
+    restoreEnv(previous);
+    delete process.env.ORBEXA_JOB_DIR;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 function restoreEnv(previous: { provider?: string; key?: string; network?: string; webhook?: string }) {

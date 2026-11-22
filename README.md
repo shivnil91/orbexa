@@ -75,7 +75,7 @@ On ECS, the one-off task command override is `["migrate"]`. Leave `DB_HOST` unse
 
 API environment: `PORT`, `ORBEXA_ENV`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`, `TEMPORAL_ADDRESS`, `DOCUMENT_BUCKET`, `WORK_QUEUE_URL`, `STRIPE_SECRET_KEY`. The entrypoint creates `DATABASE_URL` from the `DB_*` variables. The dev task also injects `STRIPE_TEST_SECRET_KEY` from the same Stripe test secret; the web app reads that name.
 
-Worker command: `python -m orbexa_ai.serve 127.0.0.1:7233 orbexa-dev`. It reads `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` from the process environment only. The image does not set them.
+Worker command: `python -m orbexa_ai.serve 127.0.0.1:7233 orbexa-dev`. It reads `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` from the process environment only. The image does not set them. The API container receives the same two variables. With neither key set, a paid draft uses the local fixture. With a key set, the API calls Anthropic, then OpenAI, under a token cap, a cost cap, and a 20 second timeout. A failed draft is refunded. Customer text and keys are not written to logs.
 
 ## Status
 
