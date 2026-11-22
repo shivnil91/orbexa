@@ -7,7 +7,8 @@ import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite-pgvector";
 import { splitServiceAmount } from "@orbexa/db/money.ts";
 import { loadMigrations } from "@orbexa/db/migrations.ts";
-import { IdempotentLedger } from "./ledger.ts";
+import { persistWebhook, type Sql } from "./ledger.ts";
+import { putObject } from "./object-store.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
 import { stripeCallCount } from "./payments/stripe-stub.ts";
 
@@ -36,6 +37,7 @@ export type SliceReport = {
   ledgerBalanced: boolean;
   draftText: string;
   stripeCalls: number;
+  deliverableKeys: { docx: string; xlsx: string };
 };
 
 type WorkerClaim = {
@@ -91,9 +93,6 @@ export async function runHospitalBedSlice(): Promise<SliceReport> {
   provider.rememberSplit(session.id, { ...split, taxMinor: 0n });
   const signed = provider.capture(session.id);
   const event = provider.verifyWebhook(signed.body, signed.signature);
-  const ledger = new IdempotentLedger();
-  const lines = ledger.apply(event);
-  ledger.apply(event);
   const order = await db.query<{ id: string }>(`
     INSERT INTO orders (
       buyer_org_id, home_region, listing_tier_id, listing_currency, service_amount_minor,
@@ -107,37 +106,24 @@ export async function runHospitalBedSlice(): Promise<SliceReport> {
     ) RETURNING id
   `);
   const orderId = order.rows[0].id;
-  const txn = await db.query<{ id: string }>(`
-    INSERT INTO ledger_transactions (
-      buyer_org_id, home_region, order_id, kind, currency, idempotency_key
-    ) VALUES (
-      '${buyer}', 'local', '${orderId}', 'charge_captured', 'USD', '${event.id}'
-    ) RETURNING id
-  `);
-  for (const line of lines) {
-    await db.exec(`
-      INSERT INTO ledger_entries (
-        transaction_id, buyer_org_id, home_region, account_code, direction, amount_minor, currency
-      ) VALUES (
-        '${txn.rows[0].id}', '${buyer}', 'local', '${line.account}', '${line.direction}',
-        ${line.amountMinor}, '${line.currency}'
-      )
-    `);
+  const post = { event, buyerOrgId: buyer, homeRegion: "local", orderId };
+  const sql = asSql(db);
+  const firstPost = await persistWebhook(sql, post);
+  const secondPost = await persistWebhook(sql, post);
+  if (!firstPost.created || secondPost.created || firstPost.transactionId !== secondPost.transactionId) {
+    throw new Error("webhook was not deduplicated");
   }
-  await db.exec(
-    `UPDATE ledger_transactions SET posted = true, posted_at = now() WHERE id = '${txn.rows[0].id}'`,
-  );
   const job = await db.query<{ id: string }>(`
     INSERT INTO jobs (tenant_id, home_region, order_id, agent_version_id, status)
     VALUES ('${buyer}', 'local', '${orderId}', '${version}', 'running')
     RETURNING id
   `);
   const jobId = job.rows[0].id;
+  const worker = runWorker("expert_verified");
   await db.exec(`
     INSERT INTO job_runs (job_id, tenant_id, home_region, workflow_id, status, idempotency_key)
-    VALUES ('${jobId}', '${buyer}', 'local', 'local-durable:${jobId}', 'running', 'run-${jobId}')
+    VALUES ('${jobId}', '${buyer}', 'local', '${worker.workflow_id}', 'running', 'run-${jobId}')
   `);
-  const worker = runWorker("expert_verified");
   const chunkIds = await insertChunks(db, jobId, worker.chunks);
   const requirementIds: string[] = [];
   for (const requirement of worker.requirements) {
@@ -213,8 +199,8 @@ export async function runHospitalBedSlice(): Promise<SliceReport> {
     VALUES ('${buyer}', 'local', '${jobId}', 'buyer_acceptance', 'approved', '${rahul}', now())
   `);
   await db.exec(`UPDATE jobs SET status = 'accepted' WHERE id = '${jobId}'`);
-  await storeDeliverable(db, jobId, "bid_docx", "response.docx", worker.deliverables.docx_base64);
-  await storeDeliverable(db, jobId, "bid_xlsx", "matrix.xlsx", worker.deliverables.xlsx_base64);
+  const docxKey = await storeDeliverable(db, jobId, "bid_docx", "response.docx", worker.deliverables.docx_base64);
+  const xlsxKey = await storeDeliverable(db, jobId, "bid_xlsx", "matrix.xlsx", worker.deliverables.xlsx_base64);
   await db.exec(`
     INSERT INTO job_ratings (tenant_id, home_region, job_id, score, comment)
     VALUES ('${buyer}', 'local', '${jobId}', 5, 'Clear about the missing certificate.')
@@ -243,6 +229,7 @@ export async function runHospitalBedSlice(): Promise<SliceReport> {
     ledgerBalanced: true,
     draftText: paragraphs,
     stripeCalls: stripeCallCount(),
+    deliverableKeys: { docx: docxKey, xlsx: xlsxKey },
   };
 }
 
@@ -345,8 +332,9 @@ async function storeDeliverable(
   kind: string,
   filename: string,
   encoded: string,
-): Promise<void> {
-  const digest = createHash("sha256").update(encoded).digest("hex");
+): Promise<string> {
+  const key = `${buyer}/local/${jobId}/${filename}`;
+  const stored = putObject(key, Buffer.from(encoded, "base64"));
   await db.exec(`
     INSERT INTO documents (
       tenant_id, home_region, job_id, kind, filename, media_type, byte_size, sha256,
@@ -354,9 +342,17 @@ async function storeDeliverable(
     ) VALUES (
       '${buyer}', 'local', '${jobId}', '${kind}', '${filename}',
       '${kind === "bid_docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}',
-      ${encoded.length}, '${digest}', '${buyer}/local/${jobId}/${filename}', 'clean'
+      ${stored.byteSize}, '${stored.sha256}', '${key}', 'clean'
     )
   `);
+  return key;
+}
+
+function asSql(db: PGlite): Sql {
+  return {
+    exec: (statement) => db.exec(statement),
+    query: (statement, params) => (params ? db.query(statement, [...params]) : db.query(statement)),
+  };
 }
 
 async function insertOtherBuyerSecret(db: PGlite): Promise<void> {
@@ -407,6 +403,7 @@ function runWorker(serviceLevel: string): {
     missing_evidence: boolean;
   }[];
   deliverables: { docx_base64: string; xlsx_base64: string };
+  workflow_id: string;
 } {
   const python = path.join(root, "workers/ai/.venv/bin/python");
   const pack = spawnSync(python, ["-c", "from pathlib import Path; from orbexa_ai.pack import write_pack; write_pack(Path(r'''" + path.join(root, "fixtures/hospital-beds") + "'''))"], {

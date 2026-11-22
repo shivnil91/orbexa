@@ -1,4 +1,25 @@
+import { createHash } from "node:crypto";
 import type { WebhookEvent } from "./payments/provider.ts";
+
+export type Sql = {
+  exec(sql: string): Promise<unknown>;
+  query<T extends Record<string, unknown>>(
+    sql: string,
+    params?: readonly unknown[],
+  ): Promise<{ rows: T[] }>;
+};
+
+export type WebhookPost = {
+  event: WebhookEvent;
+  buyerOrgId: string;
+  homeRegion: string;
+  orderId: string;
+};
+
+export type WebhookPostResult = {
+  created: boolean;
+  transactionId: string;
+};
 
 export type LedgerLine = {
   account:
@@ -68,6 +89,92 @@ export class IdempotentLedger {
   transactionCount(): number {
     return this.posted.size;
   }
+}
+
+export async function persistWebhook(db: Sql, post: WebhookPost): Promise<WebhookPostResult> {
+  const lines = linesForEvent(post.event);
+  const hash = requestHash(post.event);
+  const kind = post.event.type === "payment.captured" ? "charge_captured" : "refund";
+  try {
+    await db.exec("BEGIN");
+    await db.query(
+      "INSERT INTO idempotency_keys (scope, key, request_hash) VALUES ('webhook', $1, $2)",
+      [post.event.id, hash],
+    );
+    const inserted = await db.query<{ id: string }>(
+      `INSERT INTO ledger_transactions (
+         buyer_org_id, home_region, order_id, kind, currency, idempotency_key
+       ) VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id::text AS id`,
+      [post.buyerOrgId, post.homeRegion, post.orderId, kind, post.event.currency, post.event.id],
+    );
+    const transactionId = inserted.rows[0]?.id;
+    if (!transactionId) {
+      throw new Error("ledger insert did not return an id");
+    }
+    for (const line of lines) {
+      await db.query(
+        `INSERT INTO ledger_entries (
+           transaction_id, buyer_org_id, home_region, account_code, direction, amount_minor, currency
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          transactionId,
+          post.buyerOrgId,
+          post.homeRegion,
+          line.account,
+          line.direction,
+          line.amountMinor.toString(),
+          line.currency,
+        ],
+      );
+    }
+    await db.query("UPDATE ledger_transactions SET posted = true, posted_at = now() WHERE id = $1", [
+      transactionId,
+    ]);
+    await db.exec("COMMIT");
+    return { created: true, transactionId };
+  } catch (error) {
+    await db.exec("ROLLBACK");
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+    const existing = await db.query<{ id: string; request_hash: string }>(
+      `SELECT txn.id::text AS id, keys.request_hash
+       FROM ledger_transactions AS txn
+       JOIN idempotency_keys AS keys
+         ON keys.scope = 'webhook' AND keys.key = txn.idempotency_key
+       WHERE txn.idempotency_key = $1`,
+      [post.event.id],
+    );
+    const row = existing.rows[0];
+    if (!row || row.request_hash !== hash) {
+      throw new Error("webhook idempotency key was reused with a different payload");
+    }
+    return { created: false, transactionId: row.id };
+  }
+}
+
+function requestHash(event: WebhookEvent): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        type: event.type,
+        amountMinor: event.amountMinor.toString(),
+        currency: event.currency,
+        platformFeeMinor: event.platformFeeMinor.toString(),
+        creatorRoyaltyMinor: event.creatorRoyaltyMinor.toString(),
+        reviewFeeMinor: event.reviewFeeMinor.toString(),
+        taxMinor: event.taxMinor.toString(),
+      }),
+    )
+    .digest("hex");
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  if (typeof error === "object" && error !== null && "code" in error && error.code === "23505") {
+    return true;
+  }
+  return error instanceof Error && /duplicate key|unique constraint/i.test(error.message);
 }
 
 function pushCredit(lines: LedgerLine[], account: LedgerLine["account"], amount: bigint, currency: string): void {
