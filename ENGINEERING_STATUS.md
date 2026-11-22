@@ -1,58 +1,57 @@
 # Engineering status
 
-Checked on 2026-11-22 after Milestone 2. Commands below were run in this environment. Anything not listed was not run.
+Checked on 2026-11-22 after the Milestone 2 defect fixes. Commands below were run in this environment. Anything not listed was not run.
 
 ## What works
 
-A local hospital-bed transaction runs without AWS, Stripe, or a model API:
+The hospital-bed slice still runs without AWS, Stripe, or a model API. The five defects from the previous status are fixed as follows.
 
-- Moishin is inserted as a verified expert and the listing has Autonomous, Expert Verified, and Expert Led rows.
-- Rahul checks out Expert Verified through `FakePaymentProvider`. The webhook signature is verified. A second delivery of the same event does not post the ledger twice.
-- The ledger posts one USD transaction: platform fee, creator royalty, and review fee. Debits equal credits. A separate test posts JPY without mixing it into the USD transaction. A refund reversal balances.
-- The fixture model reads the fictional pack in `fixtures/hospital-beds`, extracts the capacity and certificate requirements, marks the certificate and the quantity as missing evidence, and cites 950 mm only because that width is in the supplier note.
-- Expert Verified waits for Moishin. After approval and Rahul's acceptance, `bid_docx` and `bid_xlsx` rows exist. The Python test rewrites both files and reads the edit back.
-- A rating is stored. A lesson candidate stays `proposed`.
-- Rahul's session does not see the other buyer's pricing chunk.
-- A payout to `processing` is rejected because there is no clear payout screening.
-- Selecting `PAYMENT_PROVIDER=stripe` throws. The end-to-end slice records `stripeCalls: 0`.
-- Selecting `LLM_PROVIDER=openai` throws, including when a dummy key is set. No HTTP client is called.
-- A Temporal Python SDK 1.36.1 test server runs a workflow that waits for an approve signal. The tender slice itself uses the in-process activity runner in `workers/ai/src/orbexa_ai/workflow.py`, not that server.
+1. The tender job that the API slice shells out to is the Temporal workflow `TenderJob`: extract, matrix, draft, an approve signal when the service is not autonomous, then deliver. Each activity writes its result under a store directory before it returns, and a retry reads that file. `tests/test_temporal_resume.py` starts a worker process, waits until extract has been written, sends SIGKILL, starts a second worker, and signals approval. The extract computation counter stays `1`. The first attempt's process id is the killed process, and a later attempt runs in a different process. The delivered DOCX contains `950 mm`. The XLSX contains `regulatory certificate` and `invitation.pdf page 1`. The workflow status is `waiting_for_buyer`.
+2. `persistWebhook` inserts `idempotency_keys` (scope `webhook`) and the ledger lines in one transaction. A second delivery of the same event id returns the existing transaction. A reuse with a different payload is rejected. The slice calls it twice. A separate test opens two `pg` clients against Postgres 16 and posts the same signed fake webhook from both; one ledger transaction is stored, debits equal credits at `100000`, and there is one webhook key.
+3. Deliverable bytes are written under `.local-object-store/` (gitignored). The end-to-end test reads those bytes back, checks the ZIP header, matches `sha256` and `byte_size` to the `documents` row, and parses the DOCX and XLSX. The prose includes `950 mm`. The grid includes the certificate gap and `invitation.pdf page 1`.
+4. `pnpm --filter @orbexa/db test` still applies the schema on PGlite. `pnpm --filter @orbexa/db test:pg16` applies the same schema tests to PostgreSQL 16.15 with pgvector 0.6.0. Docker is not installed. Postgres was installed in this VM and is listening on `127.0.0.1:5432`.
+5. `POST /v1/demo/hospital-beds` is registered only when `ORBEXA_ENV` is unset, `local`, or `dev`. `prod` and `staging` do not register it. `GET /health` stays available.
 
-`POST /v1/demo/hospital-beds` on the API repeats the slice and returned `reviewFeeMinor: "15000"`, `mentionsWidth: true`, `stripeCalls: 0`.
+`POST /v1/demo/hospital-beds` on the local API returned `reviewFeeMinor: "15000"`, `mentionsWidth: true`, `stripeCalls: 0`.
 
 ## What was run
 
 | Command | Result |
 | --- | --- |
-| `pnpm --filter @orbexa/api test` | Exit 0. 8 tests, including the end-to-end slice. |
-| `pnpm --filter @orbexa/api lint` and `typecheck` | Exit 0. |
-| `pnpm --filter @orbexa/db test` | Exit 0. 24 tests. |
-| `pnpm --filter @orbexa/web test`, `lint`, `typecheck` | Exit 0. 3 tests. |
-| `ruff check .`, `mypy`, `pytest -q` in `workers/ai` | Ruff clean. mypy clean on 13 files. 14 tests passed. |
-| `pip-audit` | No known vulnerabilities. Local package `orbexa-ai` is skipped. |
-| `curl -X POST http://127.0.0.1:43124/v1/demo/hospital-beds` | HTTP 200 and the JSON summary above. |
-| `curl http://127.0.0.1:43123/en` | HTTP 200. Body mentions the fixture model. |
+| `ruff check .`, `mypy`, and `pytest -q --tb=line` in `workers/ai` | Ruff clean. mypy clean on 16 files. 15 tests passed. |
+| `pnpm --filter @orbexa/db exec tsc --noEmit` and `eslint .` | Exit 0. |
+| `pnpm --filter @orbexa/db test` | Exit 0. 24 tests on PGlite. |
+| `pnpm --filter @orbexa/db test:pg16` | Exit 0. 19 schema tests on PostgreSQL 16.15, pgvector 0.6.0. |
+| `pnpm --filter @orbexa/api exec tsc --noEmit` and `eslint .` | Exit 0. |
+| `pnpm --filter @orbexa/api test` | Exit 0. 10 tests, including the byte round-trip and the two-session webhook test. |
+| `psql` `SELECT version()` on `orbexa_test` | `PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)`. |
+| `psql` `SELECT extversion FROM pg_extension WHERE extname = 'vector'` | `0.6.0`. |
 | `curl http://127.0.0.1:43124/health` | `{"service":"orbexa-api","status":"ok"}` |
+| `curl -X POST http://127.0.0.1:43124/v1/demo/hospital-beds` | HTTP 200 and the JSON summary above. |
+| `ORBEXA_ENV=prod PORT=43125` API, `curl http://127.0.0.1:43125/health` | HTTP 200. |
+| same server, `curl -X POST http://127.0.0.1:43125/v1/demo/hospital-beds` | HTTP 404 `{"error":"not_found"}`. That process was then stopped. |
+| `curl -o /dev/null -w '%{http_code}' http://127.0.0.1:43123/en` | `200` |
+
+`pip-audit`, the web package checks, and GitHub Actions were not re-run. The workflow file now starts `pgvector/pgvector:0.8.7-pg16` and runs `test:pg16`, but Actions has not executed it.
 
 ## What is stubbed
 
-- Payments: `FakePaymentProvider` signs webhooks with HMAC-SHA256. `createStripeStub` throws on every method. Nothing in the slice imports a Stripe SDK and nothing is sent to Stripe.
-- Models: `FixtureGateway` is rule-based over the fictional pack. Anthropic, OpenAI, and xAI are `BlockedLiveGateway`. `complete` raises even if an env key is present.
-- Documents: generated PDF, DOCX, and XLSX under `fixtures/hospital-beds`. They are labeled fictional. There is no malware scanner service. `scan_upload` rejects unknown types and MZ/ELF bytes, and marks the fixture files clean.
-- Object storage: deliverable rows store a key and a hash. Bytes are not uploaded to S3. The editability test rewrites the bytes in process.
-- Workflow durability for the slice: in-process `WorkflowState.activity`. Temporal's test server is covered by `tests/test_temporal_gate.py` only. `docker compose` was not started. Docker is still not installed, so the Temporal dev server container was not run.
-- Expert verification uses `provider = 'test'` because the cell environment is `local`. That value is rejected outside local by the database trigger.
+- Payments: `FakePaymentProvider` signs webhooks with HMAC-SHA256. `createStripeStub` throws on every method. Nothing in the slice calls Stripe. The only connected Stripe account is the live ThirdRoc account and was not used.
+- Models: `FixtureGateway` is rule-based over the fictional pack. Anthropic, OpenAI, and xAI are `BlockedLiveGateway`.
+- Documents: generated PDF, DOCX, and XLSX under `fixtures/hospital-beds`. They are labeled fictional. There is no malware scanner service.
+- Object storage: a local directory keyed by `storage_key`. Bytes are not uploaded to S3.
+- Workflow durability: the Temporal Python SDK 1.36.1 time-skipping test server, which is a separate Java process. The worker is killed with SIGKILL and a second worker resumes the same workflow. Docker is not installed, so `docker compose` and `temporalio/temporal` were not started. Temporal Cloud was not used. The Java server writes a warning that it does not advertise `activity_failure_include_heartbeat` (it is older than server 1.16.0). The exactly-once check uses the activity file and the second process id, not heartbeat details.
+- The older in-process runner in `workers/ai/src/orbexa_ai/workflow.py` is still what `tests/test_milestone2.py` calls. The CLI and the API slice use `TenderJob`.
+- Expert verification uses `provider = 'test'` because the cell environment is `local`.
 - No Cognito login. The slice inserts users directly.
 
 ## Defects
 
-- The slice runner and the Temporal workflow are two pieces. Killing a process mid-extract does not resume through Temporal. The in-process runner only deduplicates activities inside one process.
-- Deliverable files are not round-tripped through the database, only their metadata.
-- Schema tests and the slice still use PGlite (PostgreSQL 18.7), not the pg16 image in Compose.
-- The demo route has no authentication. It is a local fixture runner, not a buyer API.
 - Listing discovery is an SQL insert of a published listing, not a search UI.
+- The demo route has no user authentication inside local and dev. A process with `ORBEXA_ENV=prod` or `staging` does not mount it.
+- The Temporal test server is not the production server. A crash of that server process itself is not what the kill test covers. The kill test covers the worker.
 
 ## Servers left running
 
 - Web on port 43123.
-- API on port 43124.
+- API on port 43124, with `ORBEXA_ENV` unset, so the demo route is on.

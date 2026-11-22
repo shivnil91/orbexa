@@ -1,15 +1,18 @@
 import { createServer } from "node:http";
 import { healthBody } from "./health.ts";
+import { route } from "./routes.ts";
 import { hospitalBedSummary } from "./slice.ts";
 
 const port = Number(process.env.PORT ?? 43124);
+const env = process.env.ORBEXA_ENV;
 const server = createServer((request, response) => {
-  if (request.url === "/health") {
+  const selected = route(request.method, request.url, env);
+  if (selected === "health") {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(healthBody()));
     return;
   }
-  if (request.method === "POST" && request.url === "/v1/demo/hospital-beds") {
+  if (selected === "demo") {
     void hospitalBedSummary()
       .then((summary) => {
         response.writeHead(200, { "content-type": "application/json" });

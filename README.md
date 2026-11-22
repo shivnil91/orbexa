@@ -1,6 +1,6 @@
 # Orbexa
 
-Orbexa is a marketplace where verified experts publish agents and buyers purchase a finished outcome. The first outcome is tender writing. This repository is Milestone 1: the architecture, the schema, and a small scaffold. It does not yet take orders.
+Orbexa is a marketplace where verified experts publish agents and buyers purchase a finished outcome. The first outcome is tender writing. Milestone 2 runs that transaction locally, with fake payments and a fixture model.
 
 The design notes are in `docs/`. Start with [docs/first-response.md](docs/first-response.md).
 
@@ -29,7 +29,7 @@ Postgres and the Temporal dev server:
 docker compose up
 ```
 
-That file was not executed in the environment that produced Milestone 1, because Docker was not installed. The schema tests run on PGlite instead.
+`pnpm test` applies the schema on PGlite. `pnpm --filter @orbexa/db test:pg16` applies the same suite to Postgres 16 with pgvector at `127.0.0.1:5432`, database `orbexa_test`, user `orbexa`, password `orbexa_local_only`. Docker Compose was not required for that run.
 
 Copy `.env.example` to `.env` for local URLs. Leave the Stripe and model keys empty. The only Stripe account connected to the authoring environment is a live ThirdRoc account and must not be used.
 
@@ -45,7 +45,7 @@ API:
 pnpm --filter @orbexa/api start
 ```
 
-The API listens on port 43124 and answers `GET /health`.
+The API listens on port 43124 and answers `GET /health`. `POST /v1/demo/hospital-beds` runs the local fixture only when `ORBEXA_ENV` is unset, `local`, or `dev`.
 
 ## Terraform
 

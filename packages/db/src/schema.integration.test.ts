@@ -1,8 +1,17 @@
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite-pgvector";
 import assert from "node:assert/strict";
-import { before, test } from "node:test";
+import { after, before, test } from "node:test";
 import { loadMigrations } from "./migrations.ts";
+import { recreateDatabase, type PgHandle } from "./pg16.ts";
+
+type Sql = {
+  exec(sql: string): Promise<unknown>;
+  query<T extends Record<string, unknown>>(
+    sql: string,
+    params?: readonly unknown[],
+  ): Promise<{ rows: T[] }>;
+};
 
 const buyerA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const buyerB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -12,7 +21,8 @@ const hash = "ab".repeat(32);
 const ones = `('[' || repeat('1,', 1535) || '1]')::vector(1536)`;
 const zeros = `('[' || repeat('0,', 1535) || '1]')::vector(1536)`;
 
-let db: PGlite;
+let db: Sql;
+let pg: PgHandle | undefined;
 let modelId = "";
 let jobA = "";
 let jobA2 = "";
@@ -21,7 +31,16 @@ let chunkA = "";
 let chunkB = "";
 
 before(async () => {
-  db = new PGlite({ extensions: { vector } });
+  if (process.env.PG16 === "1") {
+    pg = await recreateDatabase("orbexa_test");
+    db = pg;
+  } else {
+    const memory = new PGlite({ extensions: { vector } });
+    db = {
+      exec: (sql) => memory.exec(sql),
+      query: (sql, params) => (params ? memory.query(sql, [...params]) : memory.query(sql)),
+    };
+  }
   await db.exec("CREATE EXTENSION IF NOT EXISTS vector");
   for (const migration of await loadMigrations()) {
     await db.exec(migration.sql);
@@ -82,6 +101,10 @@ before(async () => {
   ).rows[0].id;
   chunkA = await insertChunk(buyerA, jobA, "mandatory insurance certificate for hospital beds");
   chunkB = await insertChunk(buyerB, jobB, "secret pricing schedule for the other buyer");
+});
+
+after(async () => {
+  await pg?.end();
 });
 
 async function insertJob(tenant: string, idem: string, orderIdem: string): Promise<void> {
@@ -151,7 +174,16 @@ async function asApp(settings: Record<string, string>, sql: string) {
 
 test("schema applies on Postgres and reports its version", async () => {
   const version = await db.query<{ version: string }>("SELECT version()");
-  assert.match(version.rows[0].version, /PostgreSQL/);
+  const extension = await db.query<{ extversion: string }>(
+    "SELECT extversion FROM pg_extension WHERE extname = 'vector'",
+  );
+  assert.equal(extension.rows.length, 1);
+  assert.match(extension.rows[0].extversion, /^\d+\.\d+/);
+  if (process.env.PG16 === "1") {
+    assert.match(version.rows[0].version, /PostgreSQL 16\./);
+  } else {
+    assert.match(version.rows[0].version, /PostgreSQL/);
+  }
 });
 
 test("currency exponents follow ISO and checkout stays disabled", async () => {
