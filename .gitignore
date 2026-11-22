@@ -7,6 +7,10 @@ coverage/
 *.tsbuildinfo
 .vercel/
 
+test-results/
+playwright-report/
+blob-report/
+
 .venv/
 __pycache__/
 .pytest_cache/

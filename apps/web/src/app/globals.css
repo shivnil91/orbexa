@@ -1,26 +1,92 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f6f3;
+  --foreground: #1c1917;
+  --muted: #44403c;
+  --surface: #fffcf7;
+  --line: #d6d3d1;
+  --accent: #123f3c;
+  --accent-foreground: #f8fffe;
+  --missing: #7f1d1d;
+  --missing-bg: #fef2f2;
+  --supported: #14532d;
+  --supported-bg: #f0fdf4;
+  --warning: #78350f;
+  --warning-bg: #fffbeb;
+  --focus: #115e59;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #141210;
+    --foreground: #fafaf9;
+    --muted: #d6d3d1;
+    --surface: #1c1917;
+    --line: #44403c;
+    --accent: #123f3c;
+    --accent-foreground: #f8fffe;
+    --missing: #fecaca;
+    --missing-bg: #450a0a;
+    --supported: #bbf7d0;
+    --supported-bg: #052e16;
+    --warning: #fde68a;
+    --warning-bg: #451a03;
+    --focus: #5eead4;
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-missing: var(--missing);
+  --color-missing-bg: var(--missing-bg);
+  --color-supported: var(--supported);
+  --color-supported-bg: var(--supported-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), "Geist", "Segoe UI", sans-serif;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.skip-link {
+  position: absolute;
+  left: 0.75rem;
+  top: 0.75rem;
+  z-index: 50;
+  transform: translateY(-150%);
+  border-radius: 0.5rem;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  padding: 0.75rem 1rem;
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
 }

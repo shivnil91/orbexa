@@ -10,4 +10,5 @@ test("the demo route is absent outside local and dev", () => {
   assert.equal(route("POST", "/v1/demo/hospital-beds", undefined), "demo");
   assert.equal(route("GET", "/health", "prod"), "health");
   assert.equal(route("GET", "/v1/demo/hospital-beds", "local"), "missing");
+  assert.equal(route("POST", "/v1/feedback", "prod"), "feedback");
 });

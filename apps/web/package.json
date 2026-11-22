@@ -8,9 +8,11 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
-    "test": "node --experimental-strip-types --test src/lib/format.test.ts src/lib/locale.test.ts src/lib/dashboard.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/format.test.ts src/lib/locale.test.ts src/lib/dashboard.test.ts src/lib/contrast.test.ts src/lib/payments.test.ts src/lib/jobs.test.ts src/lib/metrics-log.test.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@orbexa/db": "workspace:*",
     "next": "16.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0"
@@ -23,6 +25,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "tailwindcss": "4.3.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "@axe-core/playwright": "4.11.0",
+    "@playwright/test": "1.56.1"
   }
 }

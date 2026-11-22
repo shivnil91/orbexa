@@ -1,4 +1,4 @@
-export type Routed = "health" | "demo" | "missing";
+export type Routed = "health" | "demo" | "feedback" | "missing";
 
 export function demoEnabled(env: string | undefined): boolean {
   const name = env && env.length > 0 ? env : "local";
@@ -16,6 +16,9 @@ export function route(
   }
   if (method === "POST" && path === "/v1/demo/hospital-beds" && demoEnabled(env)) {
     return "demo";
+  }
+  if (method === "POST" && path === "/v1/feedback") {
+    return "feedback";
   }
   return "missing";
 }

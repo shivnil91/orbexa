@@ -1,0 +1,15 @@
+{
+  "note": "Scores may rise. CI fails when a score falls below these figures. This is not a certification.",
+  "lessons": {
+    "expertise_only": "0.6667",
+    "regression": "0.3333",
+    "certificate": "1.0000"
+  },
+  "judge_certificate": "1.0000",
+  "retrieval": {
+    "ts_rank_cd_hit_at_1": 0.0,
+    "bm25_hit_at_1": 0.3333333333333333,
+    "bm25_rerank_hit_at_1": 0.6666666666666666,
+    "bm25_minus_ts_rank_cd": 0.3333333333333333
+  }
+}

@@ -1,0 +1,355 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { listingBySlug, packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
+import { validateFeedback, type FeedbackInput, type FeedbackKind } from "@orbexa/db/feedback.ts";
+import { validateIntake } from "./intake.ts";
+import { checkoutPlan, type CheckoutPlan } from "./payments.ts";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const DEMO_ORG_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+export type JobStatus =
+  | "checkout"
+  | "queued"
+  | "running"
+  | "waiting_for_expert"
+  | "waiting_for_buyer"
+  | "accepted"
+  | "rejected";
+
+export type JobFeedback = {
+  kind: FeedbackKind;
+  reward: number;
+  editDistance: number | null;
+  rating: number | null;
+  at: string;
+};
+
+export type JobRecord = {
+  id: string;
+  locale: string;
+  vertical: string;
+  listingSlug: string;
+  title: string;
+  serviceLevel: ServiceLevel;
+  opportunityName: string;
+  currency: string;
+  priceMinor: number;
+  reviewFeeMinor: number;
+  platformFeeMinor: number;
+  creatorRoyaltyMinor: number;
+  deliveryDays: number;
+  includedRevisions: number;
+  cancellationCode: string;
+  payoutRelease: string;
+  agentVersionId: string;
+  tenantId: string;
+  payment: CheckoutPlan | null;
+  stages: string[];
+  cursor: number;
+  status: JobStatus;
+  transcript: DemoRun | null;
+  paragraphs: string[];
+  downloads: { code: string; href: string; filename: string }[];
+  feedback: JobFeedback[];
+  trainingConsent: boolean;
+  approvalSignal: "approve" | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  metricsWritten: boolean;
+};
+
+const locks = new Map<string, Promise<unknown>>();
+
+function rootDir(): string {
+  return process.env.ORBEXA_JOB_DIR ?? path.join(os.tmpdir(), "orbexa-m5-jobs");
+}
+
+function jobPath(id: string): string {
+  if (!UUID.test(id)) {
+    throw new Error("job id is not a uuid");
+  }
+  return path.join(rootDir(), `${id}.json`);
+}
+
+async function withLock<T>(id: string, work: () => Promise<T>): Promise<T> {
+  const previous = locks.get(id) ?? Promise.resolve();
+  const run = previous.then(work, work);
+  locks.set(id, run.then(() => undefined, () => undefined));
+  return run;
+}
+
+export async function readJob(id: string): Promise<JobRecord | null> {
+  try {
+    return JSON.parse(await readFile(jobPath(id), "utf8")) as JobRecord;
+  } catch {
+    return null;
+  }
+}
+
+async function writeJob(job: JobRecord): Promise<void> {
+  await mkdir(rootDir(), { recursive: true });
+  await writeFile(jobPath(job.id), JSON.stringify(job));
+}
+
+export async function createJob(input: {
+  locale: string;
+  slug: string;
+  tier: ServiceLevel;
+  intake: Record<string, unknown>;
+}): Promise<JobRecord> {
+  const listing = listingBySlug(input.slug);
+  if (!listing) {
+    throw new Error("listing not found");
+  }
+  const pack = packFor(listing);
+  validateIntake(pack.intakeSchema, input.intake);
+  const tier = listing.tiers.find((item) => item.serviceLevel === input.tier);
+  if (!tier) {
+    throw new Error("service level not found");
+  }
+  const name = input.intake.opportunity_name;
+  const transcript = transcriptFor(listing.vertical);
+  const job: JobRecord = {
+    id: randomUUID(),
+    locale: input.locale,
+    vertical: listing.vertical,
+    listingSlug: listing.slug,
+    title: listing.title,
+    serviceLevel: tier.serviceLevel,
+    opportunityName: typeof name === "string" ? name : "",
+    currency: tier.currency,
+    priceMinor: tier.priceMinor,
+    reviewFeeMinor: tier.reviewFeeMinor,
+    platformFeeMinor: 0,
+    creatorRoyaltyMinor: 0,
+    deliveryDays: tier.deliveryDays,
+    includedRevisions: tier.includedRevisions,
+    cancellationCode: tier.cancellationCode,
+    payoutRelease: tier.payoutRelease,
+    agentVersionId: listing.agentVersionId,
+    tenantId: DEMO_ORG_ID,
+    payment: null,
+    stages: pack.workflow,
+    cursor: 0,
+    status: "checkout",
+    transcript,
+    paragraphs: transcript?.paragraphs ?? [],
+    downloads: transcript
+      ? [
+          { code: "bid_docx", href: "/samples/tender-writing/response.docx", filename: "response.docx" },
+          { code: "bid_xlsx", href: "/samples/tender-writing/matrix.xlsx", filename: "matrix.xlsx" },
+        ]
+      : [],
+    feedback: [],
+    trainingConsent: await readConsent(DEMO_ORG_ID),
+    approvalSignal: null,
+    startedAt: null,
+    finishedAt: null,
+    metricsWritten: false,
+  };
+  const plan = checkoutPlan({
+    orderId: job.id,
+    amountMinor: tier.priceMinor,
+    currency: tier.currency,
+    reviewFeeMinor: tier.reviewFeeMinor,
+    platformFeeBps: tier.platformFeeBps,
+  });
+  job.platformFeeMinor = plan.platformFeeMinor;
+  job.creatorRoyaltyMinor = plan.creatorRoyaltyMinor;
+  job.reviewFeeMinor = plan.reviewFeeMinor;
+  await writeJob(job);
+  return job;
+}
+
+export async function payJob(id: string): Promise<JobRecord> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    const listing = listingBySlug(job.listingSlug);
+    const tier = listing?.tiers.find((item) => item.serviceLevel === job.serviceLevel);
+    if (!tier) {
+      throw new Error("service level not found");
+    }
+    job.payment = checkoutPlan({
+      orderId: job.id,
+      amountMinor: tier.priceMinor,
+      currency: tier.currency,
+      reviewFeeMinor: tier.reviewFeeMinor,
+      platformFeeBps: tier.platformFeeBps,
+    });
+    job.status = "queued";
+    await writeJob(job);
+    return job;
+  });
+}
+
+export async function revealNext(id: string): Promise<JobRecord> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    if (job.status !== "queued" && job.status !== "running") {
+      return job;
+    }
+    job.startedAt = job.startedAt ?? Date.now();
+    job.cursor += 1;
+    job.status = "running";
+    if (job.cursor >= job.stages.length) {
+      job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
+      job.finishedAt = Date.now();
+      await writeMetrics(job);
+      job.metricsWritten = true;
+    }
+    await writeJob(job);
+    return job;
+  });
+}
+
+export async function recordJobFeedback(
+  id: string,
+  input: { kind: FeedbackKind; editDistance?: number | null; rating?: number | null },
+): Promise<JobRecord> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    const feedback: FeedbackInput = {
+      tenantId: job.tenantId,
+      homeRegion: "local",
+      jobId: job.id,
+      kind: input.kind,
+      editDistance: input.editDistance ?? null,
+      rating: input.rating ?? null,
+    };
+    validateFeedback(feedback);
+    const reward = input.kind === "buyer_reject" || input.kind === "tender_loss"
+      ? -1
+      : input.kind === "buyer_edit" || input.kind === "edit_distance"
+        ? 0
+        : input.kind === "expert_rating"
+          ? ((input.rating ?? 3) - 3) / 2
+          : 1;
+    job.feedback.push({
+      kind: input.kind,
+      reward,
+      editDistance: input.editDistance ?? null,
+      rating: input.rating ?? null,
+      at: new Date().toISOString(),
+    });
+    if (input.kind === "buyer_approve") {
+      job.status = "accepted";
+    }
+    if (input.kind === "buyer_reject") {
+      job.status = "rejected";
+    }
+    await writeJob(job);
+    return job;
+  });
+}
+
+export async function recordExpertSignal(id: string): Promise<JobRecord> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    if (job.serviceLevel === "autonomous") {
+      return job;
+    }
+    job.approvalSignal = "approve";
+    job.status = "waiting_for_buyer";
+    await writeJob(job);
+    return job;
+  });
+}
+
+export async function setJobConsent(id: string, granted: boolean): Promise<JobRecord> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    job.trainingConsent = granted;
+    await writeConsent(job.tenantId, granted);
+    await writeJob(job);
+    return job;
+  });
+}
+
+async function consentPath(): Promise<string> {
+  await mkdir(rootDir(), { recursive: true });
+  return path.join(rootDir(), "training-consents.json");
+}
+
+export async function readConsent(orgId: string): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(await consentPath(), "utf8")) as Record<string, boolean>;
+    return parsed[orgId] === true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeConsent(orgId: string, granted: boolean): Promise<void> {
+  const file = await consentPath();
+  let parsed: Record<string, boolean> = {};
+  try {
+    parsed = JSON.parse(await readFile(file, "utf8")) as Record<string, boolean>;
+  } catch {
+    parsed = {};
+  }
+  parsed[orgId] = granted;
+  await writeFile(file, JSON.stringify(parsed));
+}
+
+async function writeMetrics(job: JobRecord): Promise<void> {
+  if (job.metricsWritten || !job.transcript) {
+    return;
+  }
+  const claims = job.transcript.claims;
+  const supported = claims.filter((claim) => claim.support_status === "supported").length;
+  const rate = claims.length === 0 ? 0 : supported / claims.length;
+  const latency = Math.max(1, (job.finishedAt ?? Date.now()) - (job.startedAt ?? Date.now()));
+  const lines = job.stages.map((stage, index) =>
+    JSON.stringify({
+      kind: "invocation",
+      agentVersionId: job.agentVersionId,
+      currency: job.currency,
+      jobId: job.id,
+      costMinor: 1,
+      inputTokens: 32 + index,
+      outputTokens: 16 + index,
+      latencyMs: Math.round(latency / job.stages.length),
+      cacheHit: false,
+      fallbackUsed: false,
+      model: "fixture",
+      stage,
+    }),
+  );
+  lines.push(
+    JSON.stringify({
+      kind: "run_metric",
+      agentVersionId: job.agentVersionId,
+      currency: job.currency,
+      jobId: job.id,
+      groundedClaimRate: rate,
+      latencyMs: latency,
+      costMinor: job.stages.length,
+    }),
+  );
+  lines.push(JSON.stringify({ kind: "draft", agentVersionId: job.agentVersionId, jobId: job.id }));
+  await mkdir(rootDir(), { recursive: true });
+  await writeFile(path.join(rootDir(), "invocations.jsonl"), `${lines.join("\n")}\n`, { flag: "a" });
+}
+
+export function metricsLogPath(): string {
+  return path.join(rootDir(), "invocations.jsonl");
+}

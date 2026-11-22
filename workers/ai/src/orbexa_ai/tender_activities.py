@@ -17,10 +17,12 @@ from typing import Any
 from temporalio import activity
 
 from orbexa_ai.deliverables import render_docx, render_xlsx
-from orbexa_ai.gateway import gateway_from_env
 from orbexa_ai.ingest import Chunk, chunk_document, scan_upload
 from orbexa_ai.injection import finalize_draft
 from orbexa_ai.job import MEDIA
+from orbexa_ai.retrieval_client import retrieve_for_activity
+from orbexa_ai.routing import complete_routed, store_for_payload
+from orbexa_ai.tracing import start_span
 
 
 def _store(payload: dict[str, str]) -> Path:
@@ -95,7 +97,7 @@ async def extract_activity(payload: dict[str, str]) -> dict[str, Any]:
     if cached is not None:
         return cached
     chunks = ensure_ingest(payload)
-    result = gateway_from_env().complete("extract", chunks)
+    result = _model("extract", chunks, payload)
     result["chunks"] = [chunk.__dict__ for chunk in chunks]
     _bump(store, "extract-computes")
     saved = _write(store, "extract", result)
@@ -118,7 +120,7 @@ async def matrix_activity(payload: dict[str, str]) -> dict[str, Any]:
     if cached is not None:
         return cached
     chunks = ensure_ingest(payload)
-    return _write(store, "matrix", gateway_from_env().complete("matrix", chunks))
+    return _write(store, "matrix", _model("matrix", chunks, payload))
 
 
 @activity.defn
@@ -128,7 +130,7 @@ async def draft_activity(payload: dict[str, str]) -> dict[str, Any]:
     if cached is not None:
         return cached
     chunks = ensure_ingest(payload)
-    draft = finalize_draft(gateway_from_env().complete("draft", chunks), payload.get("tenant_id"))
+    draft = finalize_draft(_model("draft", chunks, payload), payload.get("tenant_id"))
     return _write(store, "draft", draft)
 
 
@@ -171,6 +173,21 @@ async def deliver_activity(payload: dict[str, str]) -> dict[str, str]:
     }
     _write(store, "deliver", saved)
     return saved
+
+
+def _model(task: str, chunks: list[Chunk], payload: dict[str, str]) -> dict[str, Any]:
+    ops = store_for_payload(payload)
+    if task in {"extract", "draft"}:
+        retrieve_for_activity(chunks, payload, ops)
+    attributes: dict[str, object] = {}
+    tenant_id = payload.get("tenant_id", "")
+    version_id = payload.get("agent_version_id", "")
+    if tenant_id:
+        attributes["orbexa.tenant_id"] = tenant_id
+    if version_id:
+        attributes["orbexa.agent_version_id"] = version_id
+    with start_span(task, attributes):
+        return complete_routed(task, chunks, payload=payload, store=ops)
 
 
 def _locator(chunk: Chunk) -> str:
