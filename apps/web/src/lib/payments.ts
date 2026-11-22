@@ -91,6 +91,27 @@ function assertOrderAmount(input: CheckoutInput): void {
   }
 }
 
+export function stripeTestNetworkEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  assertNoLiveStripeKey(env);
+  const key = env.STRIPE_TEST_SECRET_KEY ?? "";
+  return env.PAYMENT_PROVIDER === "stripe" && key.startsWith("sk_test_") && env.STRIPE_TEST_NETWORK === "1";
+}
+
+function browserReturnUrl(value: string | undefined, fallback: string): string {
+  if (!value) {
+    return fallback;
+  }
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      return fallback;
+    }
+    return url.toString();
+  } catch {
+    return fallback;
+  }
+}
+
 export function checkoutPlan(input: CheckoutInput, env: NodeJS.ProcessEnv = process.env): CheckoutPlan {
   assertNoLiveStripeKey(env);
   assertOrderAmount(input);
@@ -135,7 +156,8 @@ export async function sendStripeTestCheckout(
   input: CheckoutInput,
   env: NodeJS.ProcessEnv,
   transport: StripeTransport,
-): Promise<{ id: string }> {
+  urls?: { successUrl?: string; cancelUrl?: string },
+): Promise<{ id: string; url?: string }> {
   const key = stripeTestEnabled(env);
   assertOrderAmount(input);
   const plan = checkoutPlan(input, env);
@@ -151,8 +173,8 @@ export async function sendStripeTestCheckout(
     "line_items[0][price_data][currency]": plan.currency.toLowerCase(),
     "line_items[0][price_data][unit_amount]": String(plan.amountMinor),
     "line_items[0][price_data][product_data][name]": "Orbexa order",
-    success_url: "https://example.invalid/return",
-    cancel_url: "https://example.invalid/cancel",
+    success_url: browserReturnUrl(urls?.successUrl, "https://example.invalid/return"),
+    cancel_url: browserReturnUrl(urls?.cancelUrl, "https://example.invalid/cancel"),
   });
   const result = await transport({
     url: "https://api.stripe.com/v1/checkout/sessions",
@@ -168,6 +190,7 @@ export async function sendStripeTestCheckout(
   }
   const parsed = JSON.parse(result.body) as {
     id?: string;
+    url?: string;
     livemode?: boolean;
     amount_total?: number;
     currency?: string;
@@ -183,6 +206,9 @@ export async function sendStripeTestCheckout(
   }
   if (String(parsed.currency ?? "").toUpperCase() !== plan.currency) {
     throw new Error("Stripe test currency does not match the order snapshot");
+  }
+  if (typeof parsed.url === "string" && parsed.url.startsWith("https://checkout.stripe.com/")) {
+    return { id: parsed.id, url: parsed.url };
   }
   return { id: parsed.id };
 }

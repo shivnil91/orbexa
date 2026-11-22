@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { recordExpertSignal } from "@/lib/jobs";
+import { appUrl, redirectTo } from "@/server/http";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
@@ -8,7 +9,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     await recordExpertSignal(id);
   } catch {
-    return NextResponse.json({ error: "signal" }, { status: 409 });
+    return redirectTo(request, `/${locale}/jobs/${id}/review`, { error: "forbidden" });
   }
-  return NextResponse.redirect(new URL(`/${locale}/jobs/${id}/review`, request.url), 303);
+  return NextResponse.redirect(appUrl(request, `/${locale}/jobs/${id}/review`), 303);
 }

@@ -1,0 +1,9 @@
+import { t } from "@/lib/i18n";
+
+export default function Loading() {
+  return (
+    <main id="content" className="mx-auto w-full max-w-6xl px-4 py-12">
+      <p className="text-muted">{t("en", "loading")}</p>
+    </main>
+  );
+}

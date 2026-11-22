@@ -4,7 +4,7 @@ import type { DemoRun } from "@/lib/catalog";
 export function EvidenceMatrix({ locale, transcript, showClaims }: { locale: string; transcript: DemoRun; showClaims: boolean }) {
   return (
     <div className="grid gap-6">
-      <section className="overflow-x-auto focus-visible:outline" tabIndex={0} aria-label={t(locale, "run.matrix")}>
+      <section className="min-w-0 max-w-full overflow-x-auto focus-visible:outline" tabIndex={0} aria-label={t(locale, "run.matrix")}>
         <table className="w-full min-w-[36rem] border-collapse text-left text-sm">
           <caption className="mb-3 text-left text-lg font-semibold text-foreground">{t(locale, "run.matrix")}</caption>
           <thead>

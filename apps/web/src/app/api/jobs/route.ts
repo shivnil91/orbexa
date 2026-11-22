@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { ServiceLevel } from "@/lib/catalog";
 import { createJob } from "@/lib/jobs";
+import { appUrl, redirectTo } from "@/server/http";
+import { currentUser } from "@/server/session";
 
 const LEVELS = new Set(["autonomous", "expert_verified", "expert_led"]);
 
@@ -9,18 +11,25 @@ export async function POST(request: Request) {
   const locale = String(form.get("locale") ?? "en");
   const slug = String(form.get("slug") ?? "");
   const tier = String(form.get("tier") ?? "");
-  if (!LEVELS.has(tier)) {
-    return NextResponse.json({ error: "service level" }, { status: 400 });
-  }
   const intake: Record<string, unknown> = {};
-  const opportunity = form.get("opportunity_name");
-  if (typeof opportunity === "string") {
-    intake.opportunity_name = opportunity;
+  for (const key of ["opportunity_name", "need"]) {
+    const value = form.get(key);
+    if (typeof value === "string" && value.length > 0) {
+      intake[key] = value;
+    }
+  }
+  if (!LEVELS.has(tier)) {
+    return redirectTo(request, `/${locale}/listings/${slug}`, { error: "intake" });
   }
   try {
-    const job = await createJob({ locale, slug, tier: tier as ServiceLevel, intake });
-    return NextResponse.redirect(new URL(`/${locale}/checkout?job=${job.id}`, request.url), 303);
+    const user = await currentUser();
+    const job = await createJob({ locale, slug, tier: tier as ServiceLevel, intake, tenantId: user?.id });
+    return NextResponse.redirect(appUrl(request, `/${locale}/checkout?job=${job.id}`), 303);
   } catch {
-    return NextResponse.json({ error: "intake" }, { status: 400 });
+    return redirectTo(request, `/${locale}/listings/${slug}/intake`, {
+      tier,
+      error: "intake",
+      need: typeof intake.need === "string" ? intake.need : typeof intake.opportunity_name === "string" ? intake.opportunity_name : undefined,
+    });
   }
 }

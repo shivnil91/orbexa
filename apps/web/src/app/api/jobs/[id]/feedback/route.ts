@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { recordJobFeedback } from "@/lib/jobs";
 import type { FeedbackKind } from "@orbexa/db/feedback.ts";
+import { appUrl, redirectTo } from "@/server/http";
 
 const KINDS = new Set([
   "buyer_approve",
@@ -19,7 +20,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const locale = String(form.get("locale") ?? "en");
   const kind = String(form.get("kind") ?? "");
   if (!KINDS.has(kind) || form.get("body") || form.get("founderAuthorise")) {
-    return NextResponse.json({ error: "feedback" }, { status: 400 });
+    return redirectTo(request, `/${locale}/jobs/${id}/review`, { error: "forbidden" });
   }
   const distance = form.get("editDistance");
   const rating = form.get("rating");
@@ -30,7 +31,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       rating: typeof rating === "string" && rating.length > 0 ? Number(rating) : null,
     });
   } catch {
-    return NextResponse.json({ error: "feedback" }, { status: 400 });
+    return redirectTo(request, `/${locale}/jobs/${id}/review`, { error: "forbidden" });
   }
-  return NextResponse.redirect(new URL(`/${locale}/jobs/${id}/review`, request.url), 303);
+  return NextResponse.redirect(appUrl(request, `/${locale}/jobs/${id}/review`), 303);
 }
