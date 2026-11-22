@@ -1,6 +1,6 @@
 # Dev deploy runbook
 
-Account `486726633485`, region `ap-southeast-2` (Asia Pacific (Sydney)). This is the only stack to apply. It has not been applied. No AWS API was called to write it. Do not apply `infra/envs/staging` or `infra/envs/prod`. Do not put a live Stripe key, a model key, or an AWS access key in git.
+Account `486726633485`, region `ap-southeast-2` (Asia Pacific (Sydney)). This is the only stack to apply. The founder has applied it. Do not apply `infra/envs/staging` or `infra/envs/prod`. Do not put a live Stripe key, a model key, an AWS access key, or a demo password in git.
 
 The shape is [ADR 0011](adr/0011-dev-environment.md). CI runs `terraform validate` with `-backend=false` and does not call AWS.
 
@@ -11,7 +11,7 @@ The shape is [ADR 0011](adr/0011-dev-environment.md). CI runs `terraform validat
 - One ECS service `orbexa-dev` with `desired_count` 0. The task is 0.25 vCPU and 1 GB, ARM, and holds the API on port 43124, the worker, and the Temporal dev server on `127.0.0.1:7233`.
 - RDS PostgreSQL 16, `db.t4g.micro`, 20 GB gp3, single-AZ, encrypted, not publicly reachable. The master password is an RDS-managed secret. pgvector is created by `packages/db/migrations/0001_foundations.sql`, not by Terraform.
 - Document bucket `orbexa-dev-documents-486726633485`, private, versioned, SSE-S3.
-- Secret shells with no values: `orbexa/dev/worker/anthropic`, `orbexa/dev/worker/openai`, `orbexa/dev/api/stripe_test`.
+- Secret shells with no values: `orbexa/dev/worker/anthropic`, `orbexa/dev/worker/openai`, `orbexa/dev/api/stripe_test`, `orbexa/dev/api/demo_auth`.
 - Budgets `orbexa-dev-monthly-20` and `orbexa-dev-monthly-50`. They measure cost before credits are applied.
 
 ## 1. Confirm the account
@@ -99,7 +99,7 @@ cp dev.tfvars.example dev.tfvars
 Edit `dev.tfvars`:
 
 - `budget_email` is a real inbox. `@example.com` is rejected.
-- `api_ingress_cidrs` is that `/32`. `0.0.0.0/0` is rejected.
+- `api_ingress_cidrs` is that `/32`. `["0.0.0.0/0"]` is acceptable only when `DEMO_BASIC_AUTH` is set. See section 12.
 - `task_desired_count` stays `0`.
 - `github_repository` stays empty until the optional OIDC step below.
 
@@ -117,7 +117,7 @@ Read the plan. Apply only if all of these are true:
 - `aws_db_instance.postgres` is `db.t4g.micro`, `multi_az` false, `publicly_accessible` false, `backup_retention_period` 1, and `max_allocated_storage` 20.
 - There is no `aws_nat_gateway`, no `aws_eip`, and no `aws_lb`.
 - `aws_ecs_service.app` has `desired_count` 0.
-- The three `aws_secretsmanager_secret` resources have no `aws_secretsmanager_secret_version`.
+- The `aws_secretsmanager_secret` resources have no `aws_secretsmanager_secret_version`.
 - The budgets are `orbexa-dev-monthly-20` and `orbexa-dev-monthly-50`.
 
 ```bash
@@ -126,7 +126,7 @@ terraform apply tfplan
 
 RDS takes several minutes. No container starts. The placeholder image is not pulled.
 
-## 6. Confirm the budget mail and store the three secrets
+## 6. Confirm the budget mail and store the secret values
 
 AWS sends a confirmation mail for each budget notification. Open them and confirm, or the alarms never send. There are two budgets and each has an actual notification and a forecast notification, so several messages can arrive. Confirm each one.
 
@@ -136,22 +136,23 @@ Store secret values while signed in to the console as the administrator. The dep
 2. Open `orbexa/dev/worker/anthropic`. Choose **Set secret value**. Type **Plaintext**. Paste the Anthropic key. Save.
 3. Repeat for `orbexa/dev/worker/openai`.
 4. Repeat for `orbexa/dev/api/stripe_test`. The value must start with `sk_test_`. If it starts with `sk_live_` or `rk_live_`, delete it. The connected ThirdRoc account is a live account and must not be used.
-5. Do not copy the RDS-managed secret into a file, a chat, or the task definition. ECS reads it when a task starts.
+5. Repeat for `orbexa/dev/api/demo_auth`. The plaintext is `user:password` with one colon between them. The password may contain further colons. This becomes the API environment variable `DEMO_BASIC_AUTH`. Do not put that string in git, a chat, or `dev.tfvars`.
+6. Do not copy the RDS-managed secret into a file, a chat, or the task definition. ECS reads it when a task starts.
 
 Terraform does not store these values and will not overwrite them on a later apply unless the secret resource itself is replaced. `secretsmanager:UpdateSecret` remains allowed because that is the API Terraform uses for secret metadata. Do not use the deployer key to call it with a secret string.
 
 ## 7. Start the task only after images exist
 
-This repository does not build the images. When they exist:
+`apps/web/Dockerfile` is the API image (the Next.js app) and `workers/ai/Dockerfile` is the worker. `scripts/build-and-push-dev.sh` pushes `linux/arm64` by default.
 
 1. Build `linux/arm64` and push the API and the worker to the URL from `terraform output ecr_repository_url`. Tags are your choice. Put the full URIs in `api_image` and `worker_image`.
-2. The API image serves `GET /health` on port 43124 and can run the health check, which is `node` fetching that URL. It reads `PORT`, `ORBEXA_ENV`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`, `TEMPORAL_ADDRESS`, `DOCUMENT_BUCKET`, `WORK_QUEUE_URL`, and `STRIPE_SECRET_KEY`. `STRIPE_SECRET_KEY` is injected from `orbexa/dev/api/stripe_test`. Assemble `DATABASE_URL` in the entrypoint with the password URL-encoded, and use `sslmode=require`.
-3. The worker image runs `python -m orbexa_ai.serve 127.0.0.1:7233 orbexa-dev`. It receives `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`. It does not receive the Stripe secret.
+2. The API image serves `GET /health` on port 43124 and can run the health check, which is `node` fetching that URL. It reads `PORT`, `ORBEXA_ENV`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`, `TEMPORAL_ADDRESS`, `DOCUMENT_BUCKET`, `WORK_QUEUE_URL`, `STRIPE_SECRET_KEY`, and `DEMO_BASIC_AUTH`. `STRIPE_SECRET_KEY` is injected from `orbexa/dev/api/stripe_test`. `DEMO_BASIC_AUTH` is injected from `orbexa/dev/api/demo_auth`. Assemble `DATABASE_URL` in the entrypoint with the password URL-encoded, and use `sslmode=require`.
+3. The worker image runs `python -m orbexa_ai.serve 127.0.0.1:7233 orbexa-dev`. It receives `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`. It does not receive the Stripe secret or `DEMO_BASIC_AUTH`.
 4. The Temporal container is `temporalio/temporal:1.10.1`, command `server start-dev --ip 127.0.0.1 --db-filename /tmp/temporal.db`. It is pulled from Docker Hub on task start. A Docker Hub limit, or a missing arm64 manifest, shows up as a pull failure. The fallback is to copy that image into the ECR repository and set `temporal_image`.
 5. Set `task_desired_count` to `1`.
 6. Plan again. The plan should change the task definition and the desired count. It should not replace the database. Apply.
 
-The API is then `http://<task public IPv4>:43124`. The address changes when the task is replaced. There is no TLS and no load balancer. The security group allows that port only from `api_ingress_cidrs`. Do not send customer documents or a live payment through it.
+The API is then `http://<task public IPv4>:43124`. That address changes when the task restarts or is replaced. There is no TLS, no DNS name, and no load balancer. `api_ingress_cidrs` is what controls who can reach port 43124. Setting it to `["0.0.0.0/0"]` is acceptable only when `DEMO_BASIC_AUTH` is set. Do not send customer documents or a live payment through it.
 
 Run SQL migrations from a one-off task in the same subnets and security group (`terraform output public_subnet_ids` and `terraform output task_security_group_id`). Do not open port 5432 to the internet so a laptop can reach RDS. The first migration runs `CREATE EXTENSION vector` as the master user. `rds.force_ssl` is 1.
 
@@ -205,7 +206,7 @@ The first apply can create the network, the secret shells, and the user pool, th
 2. In `dev.tfvars`, leave `db_backup_retention_days` at `1`.
 3. `terraform plan -var-file=dev.tfvars -out=tfplan`, then `terraform apply tfplan`.
 
-The plan should refresh the three `orbexa/dev/*` secrets, create `aws_db_instance.postgres`, and update the Cognito user pool. It should not add a NAT gateway or a load balancer. If Cognito reports that `orbexa-dev` already exists and is not in state, delete that empty pool in the Cognito console and apply again.
+The plan should refresh the existing `orbexa/dev/*` secrets, create `aws_db_instance.postgres`, and update the Cognito user pool. It should not add a NAT gateway or a load balancer. If Cognito reports that `orbexa-dev` already exists and is not in state, delete that empty pool in the Cognito console and apply again.
 
 If RDS still returns `FreeTierRestrictionError` for the backup retention, set `db_backup_retention_days = 0` and apply again. That turns automated backups off. `0` is the only shorter value.
 
@@ -230,13 +231,13 @@ US dollars, list price, 730-hour month, before tax. This is an estimate, not a q
 | Fargate Linux ARM, 0.25 vCPU, 730 hours | US$0.03885 per vCPU-hour in Sydney. Usage AI Fargate page and vmprices, the latter checked 2026-11-22. 0.25 × 0.03885 × 730 = 7.09 | 7.09 |
 | Fargate Linux ARM, 1 GB, 730 hours | US$0.00426 per GB-hour in Sydney, same sources. 0.00426 × 730 = 3.11 | 3.11 |
 | One in-use public IPv4, 730 hours | US$0.005 per hour in every commercial region, Amazon VPC pricing. Charged only while the task is running | 3.65 |
-| Secrets Manager, four secrets | US$0.40 per secret-month, Secrets Manager pricing. Three application shells plus the RDS-managed password. API calls at US$0.05 per 10,000 are under one cent at task-start volume | 1.60 |
+| Secrets Manager, five secrets | US$0.40 per secret-month, Secrets Manager pricing. Four application shells plus the RDS-managed password. API calls at US$0.05 per 10,000 are under one cent at task-start volume | 2.00 |
 | S3 Standard, 5 GB | US$0.025 per GB-month in Sydney. Toolweight's reading of the S3 pricing page, and the Clowdey regional map of 2026-11-03 (Sydney storage about 9% above the US$0.023 US East rate). Documents plus state | 0.13 |
 | CloudWatch Logs, 1 GB ingested | US$0.70 per GB, the Singapore rate on the Clowdey ingestion page checked 2026-11-13. Sydney's code is `APS2-DataProcessing-Bytes`; that page did not print the Sydney dollar rate. Retention is 7 days. If an account-level 5 GB allowance applies, this row is zero | 0.70 |
 | ECR, 1 GB | US$0.10 per GB-month from the ECR pricing example. A Sydney uplift was not extracted; treat the row as under US$0.20 | 0.10 |
 | Data transfer out, 2 GB | US$0.114 per GB. Toolweight's Sydney column, consistent with the Clowdey map (Sydney egress about 27% above US$0.09). An account-level 100 GB allowance would make this zero | 0.23 |
 | SQS, DynamoDB lock, Cognito, budgets | SQS stays inside the 1 million request allowance. The lock table is on-demand and under US$0.05. Cognito Essentials is US$0 under 10,000 monthly active users, as recorded from the Cognito pricing page on 2026-11-22 in `docs/first-response.md`. The first two AWS Budgets are US$0; a further budget is US$0.02 per day | 0.00 |
-| **Task running all month** | | **37.62** |
+| **Task running all month** | | **38.02** |
 
 Rows that are not in that total:
 
@@ -252,14 +253,30 @@ Planning figures, same assumptions:
 
 | Way of running it | USD / month before tax | What US$100 covers |
 | --- | --- | --- |
-| Task off, database on | 22.84 | about 4.4 months |
-| Task 10 hours × 22 weekdays (220 hours), database on | 27.33 | about 3.7 months |
-| Task and database on all month | 37.62 | about 2.7 months, into February 2027 |
+| Task off, database on | 23.24 | about 4.3 months |
+| Task 10 hours × 22 weekdays (220 hours), database on | 27.74 | about 3.6 months |
+| Task and database on all month | 38.02 | about 2.6 months, into February 2027 |
 
-The 220-hour row uses the same unit rates: Fargate US$2.14 + US$0.94, public IPv4 US$1.10, logs 0.3 GB at the Singapore stand-in (US$0.21), and 1 GB egress (US$0.11), on top of the US$22.84 fixed rows.
+The 220-hour row uses the same unit rates: Fargate US$2.14 + US$0.94, public IPv4 US$1.10, logs 0.3 GB at the Singapore stand-in (US$0.21), and 1 GB egress (US$0.11), on top of the US$23.24 fixed rows.
 
 US$100 spread to 2027-05-22 is about US$16.67 a month. An always-on database is already US$18.25, so the credit does not last until expiry unless the database is stopped for a large part of each month. The seven-day auto-start limit means that takes a weekly action. The US$20 alarm is the signal to stop the database or scale the task to zero.
 
-If Australian GST of 10% applies to the account, the always-on total is about US$41. The task should not stay at 1 in that case. Raising memory from 1 GB to 2 GB adds US$3.11 all month (US$40.73 before tax). Switching the task to x86 adds about US$2.55 all month (US$40.17 before tax). Stay on ARM and 1 GB unless a container is killed for memory, and then scale it to zero overnight.
+If Australian GST of 10% applies to the account, the always-on total is about US$42. The task should not stay at 1 in that case. Raising memory from 1 GB to 2 GB adds US$3.11 all month (US$41.13 before tax). Switching the task to x86 adds about US$2.55 all month (US$40.57 before tax). Stay on ARM and 1 GB unless a container is killed for memory, and then scale it to zero overnight.
 
-Nothing here was read from the account. The two rows marked as stand-ins are gp3 storage and CloudWatch ingestion. Confirm `APS2-RDS:GP3-Storage` and `APS2-DataProcessing-Bytes` in the pricing calculator before treating US$37.62 as closer than a planning figure.
+Nothing here was read from the account. The two rows marked as stand-ins are gp3 storage and CloudWatch ingestion. Confirm `APS2-RDS:GP3-Storage` and `APS2-DataProcessing-Bytes` in the pricing calculator before treating US$38.02 as closer than a planning figure.
+
+## 12. Demo Basic Auth
+
+`api_ingress_cidrs` remains the control for who can open TCP port 43124. Setting it to `["0.0.0.0/0"]` is acceptable only when `DEMO_BASIC_AUTH` is set. Store `user:password` as the plaintext of `orbexa/dev/api/demo_auth` before the next task start. The API container receives that value as `DEMO_BASIC_AUTH`. An empty shell makes ECS fail the start, the same way an empty Stripe shell does.
+
+With the variable set, the Next.js app returns 401 and `WWW-Authenticate: Basic` for every route except `GET /health` and `/api/stripe/webhook`. The task health check is `GET /health` from inside the task, so it does not send the password and does not depend on `api_ingress_cidrs`.
+
+The URL is `http://<task public IPv4>:43124`. That address changes when the task restarts. There is no load balancer and no DNS name. Find the address with the `aws ecs describe-tasks` commands in section 7.
+
+The next plan, against the stack that is already applied, should:
+
+- add `aws_secretsmanager_secret.demo_auth` named `orbexa/dev/api/demo_auth`, with no secret version
+- add that secret's ARN to `GetSecretValue` on the task execution role `orbexa-dev-execution`
+- publish a new task definition revision so the `api` container receives `DEMO_BASIC_AUTH`
+
+It should not replace RDS, the existing secrets, Cognito, the VPC, or ECR. The deployer policy files in `infra/iam` already allow secret metadata on `orbexa/dev/*` and do not need an edit for this shell. `GetSecretValue` and `PutSecretValue` stay denied on the deployer. If the task is already running, applying the new task definition rolls it and the public IP changes. Leave `task_desired_count` at 0 until the secret value is stored and the image you want is in ECR.

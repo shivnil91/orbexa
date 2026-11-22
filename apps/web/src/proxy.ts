@@ -1,7 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { decideDemoAuth, readDemoBasicAuth } from "@/lib/demo-auth";
 import { isSupportedLocale } from "@/lib/locale";
 
 export function proxy(request: NextRequest) {
+  const decision = decideDemoAuth({
+    method: request.method,
+    pathname: request.nextUrl.pathname,
+    authorization: request.headers.get("authorization"),
+    demoBasicAuth: readDemoBasicAuth(),
+  });
+  if (!decision.allow) {
+    return new NextResponse("Authentication required", {
+      status: decision.status,
+      headers: {
+        "WWW-Authenticate": decision.wwwAuthenticate,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   const segment = request.nextUrl.pathname.split("/")[1] ?? "";
   const locale = isSupportedLocale(segment) ? segment : "en";
   const headers = new Headers(request.headers);
@@ -10,5 +27,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next|api|samples|favicon.ico|health).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

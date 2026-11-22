@@ -21,15 +21,15 @@ variable "budget_email" {
 
 variable "api_ingress_cidrs" {
   type        = list(string)
-  description = "CIDRs allowed to reach the API on port 43124. Empty means no ingress. 0.0.0.0/0 is rejected."
+  description = "CIDRs allowed to reach the API on port 43124. Empty means no ingress. 0.0.0.0/0 is acceptable only when DEMO_BASIC_AUTH is set."
   default     = []
 
   validation {
     condition = alltrue([
       for cidr in var.api_ingress_cidrs :
-      can(cidrhost(cidr, 0)) && cidr != "0.0.0.0/0" && cidr != "::/0"
+      can(cidrhost(cidr, 0)) && cidr != "::/0"
     ])
-    error_message = "Use a specific CIDR such as a /32. Opening the API to the internet is rejected."
+    error_message = "Use a CIDR such as a /32. IPv6 ::/0 is rejected. 0.0.0.0/0 is only for a demo with DEMO_BASIC_AUTH set."
   }
 }
 

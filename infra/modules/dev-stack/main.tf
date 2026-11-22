@@ -323,6 +323,12 @@ resource "aws_secretsmanager_secret" "stripe_test" {
   recovery_window_in_days = 7
 }
 
+resource "aws_secretsmanager_secret" "demo_auth" {
+  name                    = "orbexa/dev/api/demo_auth"
+  description             = "Demo HTTP Basic Auth for the API, as user:password. The secret value is set in the console, not in Terraform."
+  recovery_window_in_days = 7
+}
+
 resource "aws_db_subnet_group" "this" {
   name       = "orbexa-dev"
   subnet_ids = aws_subnet.public[*].id
@@ -439,6 +445,7 @@ data "aws_iam_policy_document" "execution_secrets" {
       aws_secretsmanager_secret.anthropic.arn,
       aws_secretsmanager_secret.openai.arn,
       aws_secretsmanager_secret.stripe_test.arn,
+      aws_secretsmanager_secret.demo_auth.arn,
       one(aws_db_instance.postgres.master_user_secret).secret_arn,
     ]
   }
@@ -585,6 +592,10 @@ resource "aws_ecs_task_definition" "app" {
         {
           name      = "DB_PASSWORD"
           valueFrom = local.database_password_arn
+        },
+        {
+          name      = "DEMO_BASIC_AUTH"
+          valueFrom = aws_secretsmanager_secret.demo_auth.arn
         },
       ]
       healthCheck = {

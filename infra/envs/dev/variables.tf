@@ -10,8 +10,9 @@ variable "budget_email" {
 }
 
 variable "api_ingress_cidrs" {
-  type    = list(string)
-  default = []
+  type        = list(string)
+  description = "CIDRs allowed to reach port 43124. 0.0.0.0/0 is acceptable only when DEMO_BASIC_AUTH is set."
+  default     = []
 }
 
 variable "task_desired_count" {

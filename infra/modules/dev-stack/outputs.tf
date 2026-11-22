@@ -51,6 +51,10 @@ output "stripe_test_secret_name" {
   value = aws_secretsmanager_secret.stripe_test.name
 }
 
+output "demo_auth_secret_name" {
+  value = aws_secretsmanager_secret.demo_auth.name
+}
+
 output "anthropic_secret_name" {
   value = aws_secretsmanager_secret.anthropic.name
 }

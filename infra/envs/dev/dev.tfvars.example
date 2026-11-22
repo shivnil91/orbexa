@@ -4,7 +4,8 @@ budget_email = "you@example.com"
 db_backup_retention_days = 1
 
 # Public IP of the laptop that will call the API, with /32.
-# Leave this empty until you need ingress. 0.0.0.0/0 is rejected.
+# Leave this empty until you need ingress.
+# ["0.0.0.0/0"] is acceptable only when DEMO_BASIC_AUTH is set. See the runbook.
 api_ingress_cidrs = []
 
 # Stay at 0 until linux/arm64 images exist in ECR.

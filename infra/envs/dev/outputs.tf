@@ -50,6 +50,10 @@ output "stripe_test_secret_name" {
   value = module.dev.stripe_test_secret_name
 }
 
+output "demo_auth_secret_name" {
+  value = module.dev.demo_auth_secret_name
+}
+
 output "anthropic_secret_name" {
   value = module.dev.anthropic_secret_name
 }
