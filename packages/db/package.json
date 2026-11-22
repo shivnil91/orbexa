@@ -6,13 +6,14 @@
   "exports": {
     "./money.ts": "./src/money.ts",
     "./migrations.ts": "./src/migrations.ts",
+    "./learning.ts": "./src/learning.ts",
     "./pg16.ts": "./src/pg16.ts"
   },
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/money.test.ts src/local-guard.test.ts src/migrations.test.ts src/schema.integration.test.ts",
-    "test:pg16": "PG16=1 node --experimental-strip-types --test src/schema.integration.test.ts",
+    "test": "node --experimental-strip-types --test src/money.test.ts src/local-guard.test.ts src/migrations.test.ts src/learning.test.ts src/schema.integration.test.ts src/learning.integration.test.ts",
+    "test:pg16": "PG16=1 node --experimental-strip-types --test src/schema.integration.test.ts && PG16=1 node --experimental-strip-types --test src/learning.integration.test.ts",
     "migrate": "node --experimental-strip-types src/migrate.ts"
   },
   "devDependencies": {
