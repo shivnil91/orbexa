@@ -1,0 +1,49 @@
+[project]
+name = "orbexa-ai"
+version = "0.0.1"
+description = "Orbexa tender-writing worker scaffold"
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph>=1.0.0",
+  "pypdf>=5.1.0",
+  "python-docx>=1.1.2",
+  "openpyxl>=3.1.5",
+  "temporalio>=1.9.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3.0", "ruff>=0.8.0", "mypy>=1.13.0"]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+packages = ["orbexa_ai"]
+mypy_path = "src"
+warn_return_any = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["pypdf", "pypdf.*", "docx", "docx.*", "openpyxl", "openpyxl.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "orbexa_ai.office"
+disallow_untyped_calls = false
+disallow_untyped_defs = false

@@ -1,0 +1,29 @@
+{
+  "name": "@orbexa/db",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./money.ts": "./src/money.ts",
+    "./migrations.ts": "./src/migrations.ts",
+    "./pg16.ts": "./src/pg16.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/money.test.ts src/local-guard.test.ts src/migrations.test.ts src/schema.integration.test.ts",
+    "test:pg16": "PG16=1 node --experimental-strip-types --test src/schema.integration.test.ts",
+    "migrate": "node --experimental-strip-types src/migrate.ts"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.17",
+    "@electric-sql/pglite-pgvector": "0.0.18",
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^22.19.1",
+    "@types/pg": "^8.15.6",
+    "eslint": "^9.39.1",
+    "pg": "^8.16.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.3"
+  }
+}
