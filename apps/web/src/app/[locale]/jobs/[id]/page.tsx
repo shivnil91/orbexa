@@ -90,7 +90,7 @@ export default async function RunPage({
               );
             })}
           </ol>
-          {allowMutate && (job.status === "queued" || job.status === "running") ? (
+          {allowMutate && !job.modelDelivery && (job.status === "queued" || job.status === "running") ? (
             <form action={`/api/jobs/${job.id}/step`} method="post">
               <input type="hidden" name="locale" value={locale} />
               <button className="inline-flex min-h-12 items-center rounded-full border border-line px-4" type="submit">

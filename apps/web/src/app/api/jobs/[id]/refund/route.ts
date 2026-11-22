@@ -16,9 +16,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (form.get("amount") || form.get("destinationAccountId")) {
     return redirectTo(request, `/${locale}/jobs/${existing.id}`, { error: "forbidden" });
   }
-  const job = await refundUnreleasedJob(existing.id);
-  if (!job) {
-    return NextResponse.json({ error: "missing" }, { status: 404 });
+  try {
+    const job = await refundUnreleasedJob(existing.id);
+    if (!job) {
+      return NextResponse.json({ error: "missing" }, { status: 404 });
+    }
+    return NextResponse.redirect(appUrl(request, `/${locale}/jobs/${job.id}`), 303);
+  } catch {
+    return redirectTo(request, `/${locale}/jobs/${existing.id}`, { error: "refund" });
   }
-  return NextResponse.redirect(appUrl(request, `/${locale}/jobs/${job.id}`), 303);
 }

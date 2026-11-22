@@ -11,6 +11,7 @@ import { validateIntake } from "./intake.ts";
 import {
   checkoutPlan,
   sendStripeTestCheckout,
+  sendStripeTestRefund,
   stripeTestNetworkEnabled,
   stripeTestTransport,
   type CheckoutPlan,
@@ -75,6 +76,7 @@ export type JobRecord = {
   refunded?: boolean;
   modelDelivery?: boolean;
   modelError?: "timeout" | "cap" | "provider" | "empty";
+  modelAttempts?: number;
   inputTokens?: number;
   outputTokens?: number;
   instructions?: string;
@@ -370,6 +372,9 @@ export async function revealNext(id: string): Promise<JobRecord> {
     if (job.refunded || job.status === "rejected" || job.status === "checkout" || !job.payment) {
       return job;
     }
+    if (job.modelDelivery) {
+      return job;
+    }
     if (job.status !== "queued" && job.status !== "running") {
       return job;
     }
@@ -555,6 +560,17 @@ async function writeMetrics(job: JobRecord): Promise<void> {
   await writeFile(path.join(rootDir(), "invocations.jsonl"), `${lines.join("\n")}\n`, { flag: "a" });
 }
 
+export const MODEL_MAX_ATTEMPTS = 2;
+
+function failedUnreleasedDraft(job: JobRecord): boolean {
+  return Boolean(job.payment)
+    && !job.refunded
+    && job.status !== "checkout"
+    && job.status !== "accepted"
+    && job.paragraphs.length === 0
+    && job.modelError != null;
+}
+
 export async function deliverPaidDraft(id: string): Promise<JobRecord> {
   return withLock(id, async () => {
     const job = await readJob(id);
@@ -567,6 +583,14 @@ export async function deliverPaidDraft(id: string): Promise<JobRecord> {
     if (job.paragraphs.length > 0) {
       return job;
     }
+    const attempts = job.modelAttempts ?? 0;
+    if (attempts >= MODEL_MAX_ATTEMPTS) {
+      job.modelError = job.modelError ?? "cap";
+      await writeJob(job);
+      return job;
+    }
+    job.modelAttempts = attempts + 1;
+    await writeJob(job);
     const outcome = await draftDeliverable({
       name: job.title,
       instructions: job.instructions ?? "",
@@ -591,11 +615,29 @@ export async function deliverPaidDraft(id: string): Promise<JobRecord> {
   });
 }
 
-export async function refundUnreleasedJob(id: string): Promise<JobRecord | null> {
+export async function refundUnreleasedJob(
+  id: string,
+  transport: StripeTransport = stripeTestTransport,
+): Promise<JobRecord | null> {
   return withLock(id, async () => {
     const job = await readJob(id);
-    if (!job || job.refunded || job.status === "accepted" || job.status === "checkout" || !job.payment) {
+    if (!job) {
+      return null;
+    }
+    if (job.refunded) {
       return job;
+    }
+    if (!failedUnreleasedDraft(job)) {
+      return job;
+    }
+    const sessionId = job.payment?.id ?? "";
+    if (stripeTestNetworkEnabled(process.env) && sessionId.startsWith("cs_test_")) {
+      await sendStripeTestRefund({
+        orderId: job.id,
+        sessionId,
+        amountMinor: job.priceMinor,
+        currency: job.currency,
+      }, process.env, transport);
     }
     job.refunded = true;
     job.status = "rejected";

@@ -1,5 +1,5 @@
-import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { loadPersonaImages } from "./blind-images.mjs";
 
 const shots = path.join(process.cwd(), "docs/gtm/round-4");
 const personas = [
@@ -20,7 +20,6 @@ if (!key) {
   process.exit(0);
 }
 
-const files = await readdir(shots).catch(() => []);
 const prompt = [
   "You are a person seeing this product for the first time. You do not know what the designer intended.",
   "From the screenshots and the goal only, answer in JSON with keys: thinks, wouldClick, wouldPayOrPublish, why.",
@@ -32,13 +31,12 @@ const prompt = [
 
 const answers = [];
 for (const persona of personas) {
-  const images = files.filter((name) => name.startsWith(`persona-${persona.id}`));
+  const images = await loadPersonaImages(shots, persona.id);
   const content = [{ type: "text", text: `${prompt}\n\nGoal: ${persona.goal}` }];
   for (const image of images) {
-    const bytes = await readFile(path.join(shots, image));
-    content.push({ type: "image", media_type: "image/png", data: bytes.toString("base64") });
+    content.push({ type: "image", media_type: image.mediaType, data: image.data });
   }
-  const text = key.provider === "anthropic" ? await askAnthropic(key.value, content) : await askOpenAI(key.value, content, images);
+  const text = key.provider === "anthropic" ? await askAnthropic(key.value, content) : await askOpenAI(key.value, content);
   answers.push({ persona: persona.id, text });
   console.log(`\n## ${persona.id}\n${text}`);
 }
@@ -66,11 +64,12 @@ async function askAnthropic(apiKey, content) {
   return (body.content ?? []).map((block) => block.text ?? "").join("\n");
 }
 
-async function askOpenAI(apiKey, content, images) {
+async function askOpenAI(apiKey, content) {
   const parts = [{ type: "text", text: content[0].text }];
-  for (const image of images) {
-    const bytes = await readFile(path.join(shots, image));
-    parts.push({ type: "image_url", image_url: { url: `data:image/png;base64,${bytes.toString("base64")}` } });
+  for (const block of content) {
+    if (block.type === "image") {
+      parts.push({ type: "image_url", image_url: { url: `data:${block.media_type};base64,${block.data}` } });
+    }
   }
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",

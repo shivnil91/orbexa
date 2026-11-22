@@ -96,6 +96,10 @@ test("listing and review pages do not inject HTML", async () => {
     const source = await readFile(file, "utf8");
     assert.equal(source.includes("dangerouslySetInnerHTML"), false, file);
     assert.equal(source.includes(".innerHTML"), false, file);
+    if (source.startsWith('"use client"') || source.includes('\n"use client"')) {
+      const valueImport = source.split("\n").some((line) => /from ["']@\/lib\/(model|jobs|payments)["']/.test(line) && !line.trimStart().startsWith("import type"));
+      assert.equal(valueImport, false, file);
+    }
   }
 });
 
@@ -106,6 +110,8 @@ test("job routes check the buyer and checkout does not take a destination accoun
     "src/app/api/jobs/[id]/signal/route.ts",
     "src/app/api/jobs/[id]/consent/route.ts",
     "src/app/api/jobs/[id]/checkout/route.ts",
+    "src/app/api/jobs/[id]/deliver/route.ts",
+    "src/app/api/jobs/[id]/refund/route.ts",
   ]) {
     const source = await readFile(path.join(process.cwd(), file), "utf8");
     assert.match(source, /canMutateJob/);
@@ -113,6 +119,17 @@ test("job routes check the buyer and checkout does not take a destination accoun
   const checkout = await readFile(path.join(process.cwd(), "src/app/api/jobs/[id]/checkout/route.ts"), "utf8");
   assert.equal(checkout.includes("destinationAccountId"), false);
   assert.equal(checkout.includes("form.get(\"amount"), false);
+  const refund = await readFile(path.join(process.cwd(), "src/app/api/jobs/[id]/refund/route.ts"), "utf8");
+  assert.match(refund, /form\.get\("amount"\)/);
+  assert.match(refund, /destinationAccountId/);
+  assert.equal(refund.includes("console."), false);
+  const deliver = await readFile(path.join(process.cwd(), "src/app/api/jobs/[id]/deliver/route.ts"), "utf8");
+  assert.equal(deliver.includes("console."), false);
+  assert.equal(deliver.includes("ANTHROPIC_API_KEY"), false);
+  const sandbox = await readFile(path.join(process.cwd(), "src/app/api/agents/sandbox/route.ts"), "utf8");
+  assert.equal(sandbox.includes("draftDeliverable"), false);
+  assert.equal(sandbox.includes("@/lib/model"), false);
+  assert.match(sandbox, /sandboxReply/);
   const events = await readFile(path.join(process.cwd(), "src/app/api/jobs/[id]/events/route.ts"), "utf8");
   assert.match(events, /canReadJob/);
   const hire = await readFile(path.join(process.cwd(), "src/app/api/jobs/route.ts"), "utf8");

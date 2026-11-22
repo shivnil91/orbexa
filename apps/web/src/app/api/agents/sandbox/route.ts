@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { draftDeliverable } from "@/lib/model";
+import { sandboxReply } from "@/lib/marketplace";
 
 const buckets = new Map<string, { count: number; resetAt: number }>();
 
@@ -27,14 +27,13 @@ export async function POST(request: Request) {
   if (need.length < 3 || need.length > 2_000 || instructions.length < 8 || instructions.length > 8_000) {
     return NextResponse.json({ error: "need" }, { status: 400 });
   }
-  const result = await draftDeliverable({
-    name: String(form.get("name") ?? "").slice(0, 120),
-    instructions,
-    knowledge: knowledge.slice(0, 2_000),
-    need,
+  return NextResponse.json({
+    paragraphs: sandboxReply({
+      name: String(form.get("name") ?? "").slice(0, 120),
+      instructions,
+      knowledge: knowledge.slice(0, 2_000),
+      need,
+    }),
+    provider: "fixture",
   });
-  if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: result.error === "cap" ? 429 : 502 });
-  }
-  return NextResponse.json({ paragraphs: result.paragraphs, provider: result.provider });
 }
