@@ -78,3 +78,31 @@ jobs:
       - run: pnpm --filter @orbexa/web exec playwright install --with-deps chromium
       - name: WCAG 2.2 AA and Core Web Vitals
         run: pnpm --filter @orbexa/web test:e2e
+
+  images:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the API and worker images
+        run: |
+          docker buildx build --platform linux/amd64 --load -f apps/web/Dockerfile -t orbexa-api:ci .
+          docker buildx build --platform linux/amd64 --load -f workers/ai/Dockerfile -t orbexa-worker:ci workers/ai
+      - name: API container answers GET /health
+        run: |
+          docker run -d --name orbexa-api -p 43124:43124 orbexa-api:ci
+          ok=0
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+            if curl -fsS http://127.0.0.1:43124/health; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          echo
+          if [ "$ok" != 1 ]; then
+            docker logs orbexa-api
+            exit 1
+          fi
+          docker exec orbexa-api node -e "fetch('http://127.0.0.1:'+(process.env.PORT||43124)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      - name: Worker image can import the serve module
+        run: docker run --rm orbexa-worker:ci python -c "import orbexa_ai.serve, orbexa_ai.startup"

@@ -1,6 +1,6 @@
 import pg from "pg";
+import { applySchemaMigrations, type MigrationClient } from "./apply-migrations.ts";
 import { assertLocalDatabaseHost } from "./local-guard.ts";
-import { loadMigrations } from "./migrations.ts";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -10,32 +10,12 @@ if (!databaseUrl) {
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
 try {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      name text PRIMARY KEY,
-      applied_at timestamptz NOT NULL DEFAULT now()
-    )
-  `);
-  const applied = new Set(
-    (await client.query<{ name: string }>("SELECT name FROM schema_migrations")).rows.map(
-      (row) => row.name,
-    ),
-  );
-  for (const migration of await loadMigrations()) {
-    if (applied.has(migration.name)) {
-      continue;
-    }
-    await client.query("BEGIN");
-    try {
-      await client.query(migration.sql);
-      await client.query("INSERT INTO schema_migrations (name) VALUES ($1)", [migration.name]);
-      await client.query("COMMIT");
-      console.log(`applied ${migration.name}`);
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    }
-  }
+  const migrationClient: MigrationClient = {
+    query(sql, params) {
+      return params ? client.query(sql, [...params]) : client.query(sql);
+    },
+  };
+  await applySchemaMigrations(migrationClient);
 } finally {
   await client.end();
 }
