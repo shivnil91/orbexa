@@ -1,0 +1,22 @@
+{
+  "name": "hospital-beds-golden",
+  "fixtureKind": "synthetic",
+  "version": 1,
+  "cases": [
+    {
+      "code": "missing-certificate",
+      "storageKey": "fixtures/hospital-beds/eval/synthetic/v1/missing-certificate.json",
+      "expect": "missing_evidence"
+    },
+    {
+      "code": "cite-width",
+      "storageKey": "fixtures/hospital-beds/eval/synthetic/v1/cite-width.json",
+      "expect": "cite_width"
+    },
+    {
+      "code": "hostile-stage-order",
+      "storageKey": "fixtures/hospital-beds/eval/synthetic/v1/hostile-stage-order.json",
+      "expect": "fixed_stages"
+    }
+  ]
+}

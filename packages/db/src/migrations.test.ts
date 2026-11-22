@@ -62,5 +62,16 @@ test("migrations declare the foundation tables and do not enable checkout", asyn
   assert.equal(sql.includes("INSERT INTO jurisdiction_restrictions"), false);
   assert.equal(sql.includes("sk_live"), false);
   assert.match(sql, /SECURITY INVOKER/);
-  assert.equal(/FUNCTION app\.retrieve_chunks[\s\S]*?SECURITY DEFINER/.test(sql), false);
+  for (const name of ["app.retrieve_chunks", "app.retrieve_memory"]) {
+    const bodies = [
+      ...sql.matchAll(
+        new RegExp(`CREATE(?: OR REPLACE)? FUNCTION ${name.replace(".", "\\.")}\\([\\s\\S]*?\\$\\$;`, "g"),
+      ),
+    ];
+    assert.ok(bodies.length >= 1, name);
+    for (const body of bodies) {
+      assert.equal(body[0].includes("SECURITY DEFINER"), false, name);
+      assert.match(body[0], /SECURITY INVOKER/);
+    }
+  }
 });
