@@ -65,7 +65,7 @@ export default async function RunPage({
           <p className="text-sm leading-6">{t(locale, "run.refunded")}</p>
         </div>
       ) : null}
-      {waitingOnModel ? <DraftPoll failed={t(locale, "run.failed")} jobId={job.id} pending={t(locale, "run.working")} /> : null}
+      {waitingOnModel ? <DraftPoll failed={t(locale, "run.failed")} jobId={job.id} locale={locale} pending={t(locale, "run.working")} refundLabel={t(locale, "run.refund")} retryLabel={t(locale, "run.retry")} /> : null}
       {ready ? (
         <section className="rounded-2xl border border-line bg-surface p-5">
           <h2 className="text-xl font-semibold">{job.title}</h2>

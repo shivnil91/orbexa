@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
-const shots = path.join(process.cwd(), "docs/gtm/round-3");
+const shots = path.join(process.cwd(), "docs/gtm/round-4");
 const personas = [
   { id: "maya", goal: "Maya owns a bakery. She wants a calm reply she can send to a catering client, and she will pay about $15 if the price and a sample are obvious." },
   { id: "derek", goal: "Derek manages operations. He wants a checklist a teammate can follow, and he will pay about $25 if the price and a sample are obvious." },
@@ -56,7 +56,7 @@ async function askAnthropic(apiKey, content) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: "claude-3-5-haiku-20241022", max_tokens: 400, messages: [{ role: "user", content: blocks }] }),
+    body: JSON.stringify({ model: process.env.ORBEXA_MODEL?.trim() || "claude-sonnet-5-5", max_tokens: 400, messages: [{ role: "user", content: blocks }] }),
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {

@@ -72,7 +72,8 @@ test("seller publishes, buyer hires, and admin can hide the listing", async ({ p
   await page.screenshot({ path: `/opt/cursor/artifacts/search-results-${info.project.name}.png`, fullPage: true });
   await match.getByRole("button", { name: /Pay .* and get this/ }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Your draft" })).toBeVisible();
-  await expect(page.getByText(`You asked: ${skill}`)).toBeVisible();
+  await expect(page.getByText("No measurement was added")).toBeVisible();
+  await expect(page.getByText("Instructions used")).toHaveCount(0);
   await noOverflow(page);
   await page.screenshot({ path: `/opt/cursor/artifacts/hire-checkout-${info.project.name}.png`, fullPage: true });
   await page.getByRole("button", { name: "Accept this draft" }).click();

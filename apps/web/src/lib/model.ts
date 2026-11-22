@@ -4,6 +4,8 @@ export const MODEL_TIMEOUT_MS = 20_000;
 export const MODEL_MAX_OUTPUT_TOKENS = 700;
 export const MODEL_MAX_INPUT_CHARS = 8_000;
 export const MODEL_MAX_COST_USD = 0.05;
+export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
+export const OPENAI_MODEL = "gpt-4o-mini";
 
 const INPUT_USD_PER_TOKEN = 3 / 1_000_000;
 const OUTPUT_USD_PER_TOKEN = 15 / 1_000_000;
@@ -22,7 +24,12 @@ export type DraftOutcome =
 type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
 
 export function modelConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return providerKey(env) !== null;
+  return Boolean(usable(env.ANTHROPIC_API_KEY) || usable(env.OPENAI_API_KEY));
+}
+
+export function anthropicModel(env: NodeJS.ProcessEnv = process.env): string {
+  const requested = (env.ORBEXA_MODEL ?? "").trim();
+  return requested || DEFAULT_ANTHROPIC_MODEL;
 }
 
 function usable(value: string | undefined): string | null {
@@ -31,18 +38,6 @@ function usable(value: string | undefined): string | null {
     return null;
   }
   return key;
-}
-
-function providerKey(env: NodeJS.ProcessEnv): { provider: "anthropic" | "openai"; key: string } | null {
-  const anthropic = usable(env.ANTHROPIC_API_KEY);
-  if (anthropic) {
-    return { provider: "anthropic", key: anthropic };
-  }
-  const openai = usable(env.OPENAI_API_KEY);
-  if (openai) {
-    return { provider: "openai", key: openai };
-  }
-  return null;
 }
 
 export function estimateDraftCost(inputChars: number): number {
@@ -60,8 +55,9 @@ export async function draftDeliverable(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: FetchLike = defaultFetch,
 ): Promise<DraftOutcome> {
-  const selected = providerKey(env);
-  if (!selected) {
+  const anthropicKey = usable(env.ANTHROPIC_API_KEY);
+  const openaiKey = usable(env.OPENAI_API_KEY);
+  if (!anthropicKey && !openaiKey) {
     const paragraphs = sandboxReply(input);
     return { ok: true, paragraphs, provider: "fixture", inputTokens: 0, outputTokens: 0 };
   }
@@ -78,30 +74,45 @@ export async function draftDeliverable(
     knowledge ? `Seller notes: ${knowledge}` : "",
   ].filter((part) => part.length > 0).join("\n\n");
   try {
-    const response = selected.provider === "anthropic"
-      ? await callAnthropic(selected.key, system, need, fetchImpl)
-      : await callOpenAI(selected.key, system, need, fetchImpl);
+    let response: { text: string; inputTokens: number; outputTokens: number } | null = null;
+    let provider: "anthropic" | "openai" = "anthropic";
+    if (anthropicKey) {
+      try {
+        response = await callAnthropic(anthropicKey, anthropicModel(env), system, need, fetchImpl);
+      } catch (error) {
+        if (!openaiKey && isTimeout(error)) {
+          return { ok: false, error: "timeout" };
+        }
+        response = null;
+      }
+    }
+    if (!response && openaiKey) {
+      provider = "openai";
+      response = await callOpenAI(openaiKey, system, need, fetchImpl);
+    }
     if (!response) {
-      return { ok: false, error: "empty" };
+      return { ok: false, error: "provider" };
     }
     const spent = response.inputTokens * INPUT_USD_PER_TOKEN + response.outputTokens * OUTPUT_USD_PER_TOKEN;
     if (spent > MODEL_MAX_COST_USD) {
       return { ok: false, error: "cap" };
     }
-    return {
-      ok: true,
-      paragraphs: response.text.split(/\n{2,}/).map((part) => part.trim()).filter((part) => part.length > 0),
-      provider: selected.provider,
-      inputTokens: response.inputTokens,
-      outputTokens: response.outputTokens,
-    };
+    const paragraphs = response.text.split(/\n{2,}/).map((part) => part.trim()).filter((part) => part.length > 0);
+    if (paragraphs.length === 0) {
+      return { ok: false, error: "empty" };
+    }
+    return { ok: true, paragraphs, provider, inputTokens: response.inputTokens, outputTokens: response.outputTokens };
   } catch (error) {
-    const name = error instanceof Error ? error.name : "";
-    if (name === "TimeoutError" || name === "AbortError") {
+    if (isTimeout(error)) {
       return { ok: false, error: "timeout" };
     }
     return { ok: false, error: "provider" };
   }
+}
+
+function isTimeout(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : "";
+  return name === "TimeoutError" || name === "AbortError";
 }
 
 async function defaultFetch(url: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) {
@@ -109,7 +120,7 @@ async function defaultFetch(url: string, init: { method: string; headers: Record
   return { ok: response.ok, status: response.status, json: () => response.json() as Promise<unknown> };
 }
 
-async function callAnthropic(key: string, system: string, need: string, fetchImpl: FetchLike) {
+async function callAnthropic(key: string, model: string, system: string, need: string, fetchImpl: FetchLike) {
   const response = await fetchImpl("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -118,7 +129,7 @@ async function callAnthropic(key: string, system: string, need: string, fetchImp
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-3-5-haiku-20241022",
+      model,
       max_tokens: MODEL_MAX_OUTPUT_TOKENS,
       system,
       messages: [{ role: "user", content: need }],
@@ -151,7 +162,7 @@ async function callOpenAI(key: string, system: string, need: string, fetchImpl: 
       authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: OPENAI_MODEL,
       max_tokens: MODEL_MAX_OUTPUT_TOKENS,
       messages: [
         { role: "system", content: system },

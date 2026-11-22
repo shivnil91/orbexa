@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { secondaryButton } from "./styles";
+import { primaryButton, secondaryButton } from "./styles";
 
 export function DraftActions({ text, filename }: { text: string; filename: string }) {
   const [copied, setCopied] = useState(false);
@@ -36,13 +36,14 @@ export function DraftActions({ text, filename }: { text: string; filename: strin
   );
 }
 
-export function DraftPoll({ jobId, pending, failed }: { jobId: string; pending: string; failed: string }) {
+export function DraftPoll({ jobId, locale, pending, failed, retryLabel, refundLabel }: { jobId: string; locale: string; pending: string; failed: string; retryLabel: string; refundLabel: string }) {
   const [paragraphs, setParagraphs] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let stopped = false;
-    const tick = async () => {
+    void (async () => {
       const response = await fetch(`/api/jobs/${jobId}/deliver`, { method: "POST", headers: { accept: "application/json" } });
       if (stopped) return;
       if (!response.ok) {
@@ -50,22 +51,34 @@ export function DraftPoll({ jobId, pending, failed }: { jobId: string; pending: 
         return;
       }
       const body = await response.json() as { paragraphs?: string[]; refunded?: boolean; error?: string | null };
-      if (body.refunded || body.error) {
-        setError(failed);
-        return;
-      }
+      if (stopped) return;
       if ((body.paragraphs ?? []).length > 0) {
         setParagraphs(body.paragraphs ?? []);
+        setError(null);
+        return;
       }
-    };
-    void tick();
+      if (body.refunded || body.error) {
+        setError(failed);
+      }
+    })();
     return () => {
       stopped = true;
     };
-  }, [failed, jobId]);
+  }, [attempt, failed, jobId]);
 
   if (error) {
-    return <p role="alert" className="rounded-2xl bg-missing-bg p-4 text-sm leading-6 text-missing">{error}</p>;
+    return (
+      <div className="grid gap-3 rounded-2xl bg-missing-bg p-4">
+        <p role="alert" className="text-sm leading-6 text-missing">{error}</p>
+        <button className={primaryButton} type="button" onClick={() => { setError(null); setAttempt((value) => value + 1); }}>
+          {retryLabel}
+        </button>
+        <form action={`/api/jobs/${jobId}/refund`} method="post">
+          <input name="locale" type="hidden" value={locale} />
+          <button className={secondaryButton} type="submit">{refundLabel}</button>
+        </form>
+      </div>
+    );
   }
   if (!paragraphs) {
     return <p role="status" className="rounded-2xl border border-line bg-surface p-5 text-lg">{pending}</p>;

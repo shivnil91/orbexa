@@ -271,9 +271,9 @@ test("a paid everyday job returns the draft without another step", async () => {
     });
     const paid = await payJob(job.id);
     assert.equal(paid.status, "waiting_for_buyer");
-    assert.match(paid.paragraphs.join("\n"), /Draft a calm support reply/);
-    assert.match(paid.paragraphs[0] ?? "", /Sample draft/);
-    assert.equal(paid.paragraphs[0]?.toLowerCase().includes("fixture"), false);
+    assert.match(paid.paragraphs.join("\n"), /Thanks for writing about the catering order/);
+    assert.equal(paid.paragraphs.join("\n").includes("Instructions used"), false);
+    assert.equal(paid.paragraphs.join("\n").toLowerCase().includes("fixture"), false);
   } finally {
     restoreEnv(previous);
     delete process.env.ORBEXA_JOB_DIR;
@@ -313,8 +313,9 @@ test("a model-backed job waits for the provider and refunds when it fails", asyn
     assert.equal(paid.status, "running");
     assert.equal(paid.paragraphs.length, 0);
     const failed = await deliverPaidDraft(paid.id);
-    assert.equal(failed.refunded, true);
+    assert.equal(failed.refunded, undefined);
     assert.equal(failed.modelError, "provider");
+    assert.equal(failed.paragraphs.length, 0);
     assert.equal(JSON.stringify(failed).includes("sk-ant-test"), false);
     assert.equal(JSON.stringify(failed).includes("Draft a calm support reply"), true);
   } finally {

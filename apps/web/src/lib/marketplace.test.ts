@@ -104,12 +104,16 @@ test("generated tiers balance and live runs replace example run counts", () => {
   assert.equal(first?.slug.length > 0, true);
 });
 
-test("the sandbox reply is labeled as a sample draft and quotes the request", () => {
+test("the sandbox reply is a finished note and does not echo the instructions", () => {
   const paragraphs = sandboxReply({ name: "Load checker", instructions: "Flag missing load cases.", knowledge: "LC2", need: "Check bridge load case LC2" });
-  assert.match(paragraphs[0] ?? "", /Sample draft/);
-  assert.match(paragraphs[0] ?? "", /listing instructions/);
-  assert.match(paragraphs.join("\n"), /Check bridge load case LC2/);
-  assert.match(paragraphs.join("\n"), /Flag missing load cases/);
+  const text = paragraphs.join("\n");
+  assert.match(text, /LC2/);
+  assert.match(text, /No measurement was added/);
+  assert.equal(text.includes("Instructions used"), false);
+  assert.equal(text.includes("Flag missing load cases."), false);
+  const reply = sandboxReply({ name: "Support reply", instructions: "Restate the issue.", knowledge: "", need: "Draft a calm support reply about catering" }).join("\n");
+  assert.match(reply, /Thanks for writing about the catering order/);
+  assert.equal(reply.includes("Restate the issue."), false);
 });
 
 test("a skill becomes a priced draft a buyer can preview", () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { draftDeliverable, estimateDraftCost, MODEL_MAX_COST_USD, modelConfigured } from "./model.ts";
+import { anthropicModel, DEFAULT_ANTHROPIC_MODEL, draftDeliverable, estimateDraftCost, MODEL_MAX_COST_USD, modelConfigured } from "./model.ts";
 
 const KEY = "sk-ant-test-key-not-a-secret-value";
 
@@ -12,7 +12,8 @@ test("without a model key the draft is the local fixture and quotes the request"
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.provider, "fixture");
-    assert.match(result.paragraphs.join("\n"), /The catering deposit/);
+    assert.match(result.paragraphs.join("\n"), /Thanks for writing about the catering order/);
+    assert.equal(result.paragraphs.join("\n").includes("Restate the issue."), false);
   }
   assert.equal(modelConfigured({}), false);
   assert.equal(modelConfigured({ ANTHROPIC_API_KEY: "short", OPENAI_API_KEY: "sk_live_rejected_key_value" }), false);
@@ -52,6 +53,7 @@ test("an Anthropic response becomes the deliverable", async () => {
     { ANTHROPIC_API_KEY: KEY },
     async (_url, init) => {
       assert.equal(init.headers["x-api-key"], KEY);
+      assert.equal(JSON.parse(init.body).model, DEFAULT_ANTHROPIC_MODEL);
       assert.equal(JSON.stringify(init.headers).includes("authorization"), false);
       return {
         ok: true,
@@ -68,6 +70,36 @@ test("an Anthropic response becomes the deliverable", async () => {
     assert.equal(result.provider, "anthropic");
     assert.match(result.paragraphs.join("\n"), /deposit is still unpaid/);
     assert.equal(result.outputTokens, 20);
+  }
+});
+
+test("a retired Anthropic model error falls through to OpenAI", async () => {
+  const calls: string[] = [];
+  const result = await draftDeliverable(
+    { name: "Support reply", instructions: "Restate the issue in plain words.", knowledge: "", need: "The deposit is unpaid." },
+    { ANTHROPIC_API_KEY: KEY, OPENAI_API_KEY: "sk-openai-test-key-not-a-secret", ORBEXA_MODEL: "claude-haiku-5-5" },
+    async (url) => {
+      calls.push(url);
+      if (url.includes("anthropic")) {
+        return { ok: false, status: 404, json: async () => ({ error: { message: "model not found" } }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: "Thanks for writing.\n\nReply with the date you can send the deposit." } }],
+          usage: { prompt_tokens: 20, completion_tokens: 12 },
+        }),
+      };
+    },
+  );
+  assert.deepEqual(calls, ["https://api.anthropic.com/v1/messages", "https://api.openai.com/v1/chat/completions"]);
+  assert.equal(anthropicModel({ ORBEXA_MODEL: "claude-haiku-5-5" }), "claude-haiku-5-5");
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.provider, "openai");
+    assert.equal(JSON.stringify(result).includes("model not found"), false);
+    assert.equal(JSON.stringify(result).includes("Restate the issue"), false);
   }
 });
 

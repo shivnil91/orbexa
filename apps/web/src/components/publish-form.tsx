@@ -57,7 +57,7 @@ export function PublishForm({
   const shownPrice = price.trim() ? `$${price.trim()}` : "$0";
 
   return (
-    <form action="/api/agents" className="grid gap-6" method="post">
+    <form action="/api/agents" className="grid gap-6" id="publish" method="post">
       <input name="locale" type="hidden" value={locale} />
       <input name="intent" type="hidden" value="publish" />
       <input name="skill" type="hidden" value={skill} />
@@ -72,7 +72,7 @@ export function PublishForm({
         <p className="mt-3 text-sm leading-6">{pitch}</p>
         <div className="mt-4 rounded-xl border border-line p-4">
           <h3 className="font-semibold">{labels.sample}</h3>
-          <p className="mt-2 text-sm leading-6">{exampleBody}</p>
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{exampleBody}</p>
         </div>
         <LiveSample instructions={instructions} name={name} sample={`Show a sample for a buyer who needs this: ${name}`} />
       </aside>

@@ -10,6 +10,32 @@ import { isSupportedLocale } from "@/lib/locale";
 import { CATEGORIES, categoryLabel, draftFromSkill } from "@/lib/marketplace";
 import { currentUser } from "@/server/session";
 
+function earningsFrom(priceRaw: string): { job: string; keep: string; fee: string } | null {
+  const dollars = Number(priceRaw);
+  if (!Number.isFinite(dollars) || dollars <= 0) return null;
+  const keep = Math.round(dollars * 80) / 100;
+  const fee = Math.round(dollars * 20) / 100;
+  const show = (value: number) => Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
+  return { job: show(dollars), keep: show(keep), fee: show(fee) };
+}
+
+function EarningsSplit({ priceRaw, note }: { priceRaw: string; note: string }) {
+  const split = earningsFrom(priceRaw);
+  if (!split) return <p className="mt-4 text-sm leading-6">{note}</p>;
+  return (
+    <section className="mt-4 rounded-3xl border border-line bg-surface p-5" aria-label="What you keep">
+      <p className="text-sm font-semibold uppercase tracking-[0.14em] text-accent">A {split.job} job</p>
+      <p className="mt-3 font-display text-4xl font-semibold">You keep {split.keep}</p>
+      <div className="mt-4 flex h-3 overflow-hidden rounded-full" aria-hidden="true">
+        <span className="w-4/5 bg-accent" />
+        <span className="w-1/5 bg-line" />
+      </div>
+      <p className="mt-3 text-sm leading-6">{note}</p>
+      <p className="mt-1 text-sm text-muted">On {split.job}, Orbexa keeps {split.fee}.</p>
+    </section>
+  );
+}
+
 export const metadata: Metadata = { title: "Earn from your skills" };
 
 export default async function EarnPage({
@@ -33,16 +59,7 @@ export default async function EarnPage({
         <p className="text-sm font-semibold text-muted">{t(locale, "earn.step", { step: draft ? "2" : "1" })}</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">{t(locale, "sell.title")}</h1>
         <p className="mt-3 text-lg leading-8">{t(locale, "sell.lede")}</p>
-        <section className="mt-4 rounded-3xl border border-line bg-surface p-5" aria-label="What you keep">
-          <p className="text-sm font-semibold uppercase tracking-[0.14em] text-accent">A $25 job</p>
-          <p className="mt-3 font-display text-4xl font-semibold">You keep $20</p>
-          <div className="mt-4 flex h-3 overflow-hidden rounded-full" aria-hidden="true">
-            <span className="w-4/5 bg-accent" />
-            <span className="w-1/5 bg-line" />
-          </div>
-          <p className="mt-3 text-sm leading-6">{t(locale, "earn.earnings")}</p>
-          <p className="mt-1 text-sm text-muted">On $25, Orbexa keeps $5.</p>
-        </section>
+        {draft ? <EarningsSplit priceRaw={draft.priceRaw} note={t(locale, "earn.earnings")} /> : <p className="mt-4 text-sm leading-6">{t(locale, "earn.earnings")}</p>}
       </header>
       {error ? <Notice tone="error">{error}</Notice> : null}
       {skill && !draft ? <Notice tone="error">{t(locale, "earn.short")}</Notice> : null}

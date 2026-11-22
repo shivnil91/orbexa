@@ -74,7 +74,7 @@ export default async function GetPage({
                       {sample ? (
                         <div className="rounded-xl border border-line p-4">
                           <h3 className="text-base font-semibold">{t(locale, "get.sample")}</h3>
-                          <p className="mt-2 text-sm leading-6">{sample.body}</p>
+                          <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{sample.body}</p>
                         </div>
                       ) : null}
                       <form action="/api/jobs" method="post">

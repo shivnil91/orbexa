@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
-import { primaryButton } from "@/components/styles";
+import { StickyBar } from "@/components/sticky-bar";
 import { t } from "@/lib/i18n";
 import { isSupportedLocale, type Locale } from "@/lib/locale";
 import { currentUser } from "@/server/session";
@@ -38,9 +38,7 @@ export default async function LocaleLayout({
         signOutLabel={user ? t(active, "nav.signOut") : undefined}
       />
       <div className="mobile-cta-space min-w-0 flex-1">{children}</div>
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface p-3 sm:hidden">
-        <Link className={primaryButton} href={`/${active}/get`}>{t(active, "home.buyerDoor")}</Link>
-      </div>
+      <StickyBar buyerLabel={t(active, "home.buyerDoor")} locale={active} sellerLabel={t(active, "sticky.publish")} />
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-6 text-sm leading-6 text-muted sm:px-8">
           <p>{t(active, "footer.honest")}</p>

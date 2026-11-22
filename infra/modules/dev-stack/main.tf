@@ -579,6 +579,7 @@ resource "aws_ecs_task_definition" "app" {
       ]
       environment = concat(local.shared_environment, [
         { name = "PORT", value = "43124" },
+        { name = "ORBEXA_MODEL", value = "claude-sonnet-5-5" },
       ])
       secrets = [
         {

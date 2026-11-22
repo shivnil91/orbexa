@@ -7,15 +7,18 @@ test.describe("phone personas", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("Maya, a bakery owner, gets a customer reply", async ({ page }) => {
-    await hire(page, "maya", "Draft a calm support reply that restates the catering issue and the next step", "Support reply", "$15.00");
+    // Example fixture standing in for the live model: a sendable reply, not an echo of the instructions.
+    await hire(page, "maya", "Draft a calm support reply that restates the catering issue and the next step", "Support reply", "$15.00", "Thanks for writing about the catering order");
   });
 
   test("Derek, an ops manager, gets an onboarding checklist", async ({ page }) => {
-    await hire(page, "derek", "Turn a recurring operations task into a checklist a teammate can follow", "Ops checklist", "$25.00");
+    // Example fixture standing in for the live model: a full checklist.
+    await hire(page, "derek", "Turn a recurring operations task into a checklist a teammate can follow", "Ops checklist", "$25.00", "Confirm who owns the task today");
   });
 
   test("Priya, a freelancer, gets a scope note", async ({ page }) => {
-    await hire(page, "priya", "Rewrite a vague request into scope, assumptions, and out-of-scope items for a client brief", "Scope note", "$30.00");
+    // Example fixture standing in for the live model: scope, assumptions, and what is out.
+    await hire(page, "priya", "Rewrite a vague request into scope, assumptions, and out-of-scope items for a client brief", "Scope note", "$30.00", "Out of scope");
   });
 
   test("Helen, a retired engineer, publishes a drawing check", async ({ page }) => {
@@ -41,7 +44,7 @@ async function expectClear(page: Page, heading: string) {
   await expect(screen(page, heading).getByRole("heading", { level: 1 })).not.toHaveText(/^Run$/);
 }
 
-async function hire(page: Page, file: string, need: string, title: string, price: string) {
+async function hire(page: Page, file: string, need: string, title: string, price: string, deliverable: string) {
   const steps: string[] = [];
   const home = "Get expert work done by AI agents built by real experts, from $15, in minutes.";
   await page.goto("/en");
@@ -63,16 +66,17 @@ async function hire(page: Page, file: string, need: string, title: string, price
   await expect(match.getByRole("heading", { name: "Sample output" })).toBeVisible();
   await expect(match.getByText(/example rating|No reviews yet/)).toBeVisible();
   await expectClear(page, "Your top matches");
-  await page.screenshot({ path: `/opt/cursor/artifacts/persona-${file}-matches.png`, fullPage: false });
+  await page.screenshot({ path: `/opt/cursor/artifacts/persona-${file}-matches.png`, fullPage: true });
   steps.push("see the top matches");
   await match.getByRole("button", { name: `Pay ${price} and get this` }).click();
   steps.push("pay and get the result");
   await expect(page.getByRole("heading", { level: 1, name: "Your draft" })).toBeVisible();
   await expect(screen(page, "Your draft").getByText("Paid. Here is your draft.")).toBeVisible();
-  await expect(screen(page, "Your draft").getByText(`You asked: ${need}`)).toBeVisible();
+  await expect(screen(page, "Your draft").getByText(deliverable)).toBeVisible();
+  await expect(screen(page, "Your draft").getByText("Instructions used")).toHaveCount(0);
   await expectClear(page, "Your draft");
   expect(steps).toHaveLength(3);
-  await page.screenshot({ path: `/opt/cursor/artifacts/persona-${file}-result.png`, fullPage: false });
+  await page.screenshot({ path: `/opt/cursor/artifacts/persona-${file}-result.png`, fullPage: true });
 }
 
 async function publish(page: Page, file: string, skill: string, price: string) {
@@ -98,8 +102,9 @@ async function publish(page: Page, file: string, skill: string, price: string) {
   await expect(draft.getByText("Preview. Not a published listing yet.")).toBeVisible();
   await expect(draft.getByLabel("Title")).toHaveValue(skill);
   await expect(draft.getByText("You keep 80%")).toBeVisible();
+  await expect(screen(page, "What are you great at?").getByText(`You keep ${price === "$45" ? "$36" : price === "$35" ? "$28" : "$16"}`)).toBeVisible();
   await expectClear(page, "What are you great at?");
-  await page.screenshot({ path: `/opt/cursor/artifacts/persona-${file}-draft.png`, fullPage: false });
+  await page.screenshot({ path: `/opt/cursor/artifacts/persona-${file}-draft.png`, fullPage: true });
   steps.push("see the drafted listing");
   await draft.getByLabel("Name", { exact: true }).fill(file);
   await draft.getByLabel("Email").fill(email);

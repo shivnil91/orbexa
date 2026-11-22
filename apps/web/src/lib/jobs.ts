@@ -575,12 +575,11 @@ export async function deliverPaidDraft(id: string): Promise<JobRecord> {
     });
     if (!outcome.ok) {
       job.modelError = outcome.error;
-      job.refunded = true;
-      job.status = "rejected";
-      job.finishedAt = Date.now();
+      job.paragraphs = [];
       await writeJob(job);
       return job;
     }
+    job.modelError = undefined;
     job.paragraphs = outcome.paragraphs;
     job.inputTokens = outcome.inputTokens;
     job.outputTokens = outcome.outputTokens;
