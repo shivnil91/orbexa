@@ -337,6 +337,17 @@ test("creator approval publishes a better version, and rollback restores the pre
   });
   assert.equal(staged.improved, true);
   assert.equal(staged.score, "1.0000");
+  await db.query("SELECT set_config('app.learning_publish', '1', false)");
+  await db.query("SELECT set_config('app.rollback', '1', false)");
+  await assert.rejects(
+    () => db.query(
+      "UPDATE agent_versions SET status = 'published', published_at = now() WHERE id = $1",
+      [staged.versionId],
+    ),
+    /creator approval/i,
+  );
+  await db.query("SELECT set_config('app.learning_publish', '', false)");
+  await db.query("SELECT set_config('app.rollback', '', false)");
   await assert.rejects(
     () => publishLearnedVersion(db, staged.versionId, goodId, creatorUser),
     /creator approval/i,
@@ -444,6 +455,45 @@ test("creator approval publishes a better version, and rollback restores the pre
       [suite.rows[0].id, suite.rows[0].version_id, `tenants/${secret}`],
     ),
     /customer tenders are not golden cases/i,
+  );
+});
+
+test("the learning owner is not a superuser and row security still hides unrelated rows", async () => {
+  const owner = await db.query<{ rolname: string; rolsuper: boolean; rolbypassrls: boolean }>(`
+    SELECT owner_role.rolname, owner_role.rolsuper, owner_role.rolbypassrls
+    FROM pg_proc AS proc
+    JOIN pg_roles AS owner_role ON owner_role.oid = proc.proowner
+    WHERE proc.proname = 'publish_learned_version'
+  `);
+  assert.equal(owner.rows[0].rolname, "orbexa_learning");
+  assert.equal(owner.rows[0].rolsuper, false);
+  assert.equal(owner.rows[0].rolbypassrls, false);
+  const visible = await db.query<{ count: string }>(
+    "SELECT count(*)::text AS count FROM memory_items WHERE scope = 'buyer_private'",
+  );
+  assert.equal(Number(visible.rows[0].count) > 0, true);
+  for (const key of ["tenant_id", "job_id", "user_id", "agent_id", "run_id", "access"]) {
+    await db.query("SELECT set_config($1, '', false)", [`app.${key}`]);
+  }
+  const hidden = await asRole(
+    "orbexa_learning",
+    {},
+    "SELECT count(*)::text AS body FROM memory_items WHERE scope = 'buyer_private'",
+  );
+  assert.deepEqual(hidden.map((row) => row.body), ["0"]);
+  const otherBuyer = await asRole(
+    "orbexa_learning",
+    { tenant_id: buyerB, access: "org", job_id: jobB, user_id: userB },
+    "SELECT body FROM memory_items WHERE scope = 'buyer_private'",
+  );
+  assert.equal(otherBuyer.some((row) => row.body.includes("WARD-LAYOUT")), false);
+  await assert.rejects(
+    asRole("orbexa_learning", {}, "SELECT count(*)::text AS body FROM ledger_entries"),
+    /permission denied/i,
+  );
+  await assert.rejects(
+    asRole("orbexa_learning", {}, "SELECT count(*)::text AS body FROM payments"),
+    /permission denied/i,
   );
 });
 

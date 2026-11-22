@@ -1,4 +1,17 @@
 -- Milestone 3 learning loop. Customer tenders are not eval cases.
+-- orbexa_learning owns the publish and rollback functions. It is not a
+-- superuser and does not bypass row-level security. Policies below grant
+-- only the rows those functions need.
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'orbexa_learning') THEN
+    CREATE ROLE orbexa_learning NOLOGIN NOINHERIT;
+  END IF;
+END
+$$;
+
+GRANT USAGE ON SCHEMA app, public TO orbexa_learning;
 -- Approved lessons carry no buyer id. Provenance stays on memory_provenance,
 -- which the worker cannot read. Promotion of a later version still requires
 -- a higher passing eval; this migration adds the creator approval gate for
@@ -449,20 +462,12 @@ BEGIN
   THEN
     RAISE EXCEPTION 'rollback goes through app.rollback_agent_version';
   END IF;
-  IF NEW.status = 'published' AND current_setting('app.rollback', true) = '1' THEN
-    RETURN NEW;
-  END IF;
-  IF current_setting('app.learning_publish', true) = '1'
-    AND NEW.status = 'published'
-    AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'published')
-    AND NOT EXISTS (
-      SELECT 1
-      FROM version_approvals AS approval
-      WHERE approval.agent_version_id = NEW.id
-        AND approval.status = 'approved'
-    )
+  IF NEW.status = 'published'
+    AND TG_OP = 'UPDATE'
+    AND OLD.status = 'superseded'
+    AND current_user = 'orbexa_learning'
   THEN
-    RAISE EXCEPTION 'creator approval required';
+    RETURN NEW;
   END IF;
   IF NEW.status = 'published'
     AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'published')
@@ -491,6 +496,14 @@ BEGIN
           AND new_run.score > old_run.score
       ) THEN
         RAISE EXCEPTION 'promotion requires a passing eval that beats the previous version';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1
+        FROM version_approvals AS approval
+        WHERE approval.agent_version_id = NEW.id
+          AND approval.status = 'approved'
+      ) THEN
+        RAISE EXCEPTION 'creator approval required';
       END IF;
     ELSE
       RAISE EXCEPTION 'unknown promotion basis';
@@ -625,7 +638,6 @@ BEGIN
     AND published.status = 'published'
     AND published.id <> draft.id;
 
-  PERFORM set_config('app.learning_publish', '1', true);
   UPDATE agent_versions
   SET memory_snapshot_id = snap,
       status = 'published',
@@ -803,6 +815,146 @@ CREATE POLICY version_approvals_isolation ON version_approvals
   USING (creator_org_id = app.current_tenant())
   WITH CHECK (creator_org_id = app.current_tenant());
 
+CREATE OR REPLACE FUNCTION app.rollback_agent_version(p_version uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, app
+AS $$
+DECLARE
+  prev uuid;
+BEGIN
+  PERFORM set_config('app.rollback', '1', true);
+  SELECT previous_version_id INTO prev
+  FROM agent_versions
+  WHERE id = p_version AND status = 'published';
+  IF prev IS NULL THEN
+    RAISE EXCEPTION 'only the published version with a parent can roll back one step';
+  END IF;
+  UPDATE agent_versions SET status = 'rolled_back' WHERE id = p_version;
+  UPDATE agent_versions
+  SET status = 'published'
+  WHERE id = prev AND status = 'superseded';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'parent is not the superseded version';
+  END IF;
+END;
+$$;
+
+-- Reads and writes used only by the learning owner. Other tables stay denied.
+CREATE POLICY agent_versions_learning_read ON agent_versions
+  FOR SELECT TO orbexa_learning
+  USING (true);
+CREATE POLICY agent_versions_learning_update ON agent_versions
+  FOR UPDATE TO orbexa_learning
+  USING (status IN ('draft', 'published', 'superseded'))
+  WITH CHECK (status IN ('published', 'superseded', 'rolled_back'));
+
+CREATE POLICY agents_learning_read ON agents
+  FOR SELECT TO orbexa_learning
+  USING (true);
+
+CREATE POLICY lesson_candidates_learning_read ON lesson_candidates
+  FOR SELECT TO orbexa_learning
+  USING (scrub_status = 'clear' AND permission_class = 'same_region_abstracted');
+CREATE POLICY lesson_candidates_learning_update ON lesson_candidates
+  FOR UPDATE TO orbexa_learning
+  USING (scrub_status = 'clear' AND permission_class = 'same_region_abstracted')
+  WITH CHECK (status = 'approved' AND scrub_status = 'clear');
+
+CREATE POLICY version_approvals_learning_read ON version_approvals
+  FOR SELECT TO orbexa_learning
+  USING (status = 'approved');
+
+CREATE POLICY consent_grants_learning_read ON consent_grants
+  FOR SELECT TO orbexa_learning
+  USING (
+    granted
+    AND revoked_at IS NULL
+    AND subject_type = 'same_region_abstracted_lesson'
+  );
+
+CREATE POLICY org_memberships_learning_read ON org_memberships
+  FOR SELECT TO orbexa_learning
+  USING (true);
+
+CREATE POLICY memory_provenance_learning_read ON memory_provenance
+  FOR SELECT TO orbexa_learning
+  USING (source_type = 'lesson_candidate' AND source_candidate_id IS NOT NULL);
+CREATE POLICY memory_provenance_learning_insert ON memory_provenance
+  FOR INSERT TO orbexa_learning
+  WITH CHECK (
+    source_type = 'lesson_candidate'
+    AND source_candidate_id IS NOT NULL
+    AND source_job_id IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM lesson_candidates AS candidate
+      WHERE candidate.id = source_candidate_id
+        AND candidate.tenant_id = tenant_id
+        AND candidate.source_job_id = source_job_id
+    )
+  );
+
+CREATE POLICY memory_items_learning_read ON memory_items
+  FOR SELECT TO orbexa_learning
+  USING (
+    deleted_at IS NULL
+    AND status = 'active'
+    AND scope IN ('creator_expertise', 'approved_reusable')
+  );
+CREATE POLICY memory_items_learning_insert ON memory_items
+  FOR INSERT TO orbexa_learning
+  WITH CHECK (
+    scope = 'approved_reusable'
+    AND tenant_id IS NULL
+    AND authority = 'consent'
+    AND scrubbed
+    AND pii_scan_status = 'clear'
+    AND confidentiality_scan_status = 'clear'
+    AND ip_status = 'clear'
+  );
+
+CREATE POLICY memory_embeddings_learning_insert ON memory_embeddings
+  FOR INSERT TO orbexa_learning
+  WITH CHECK (scope = 'approved_reusable' AND tenant_id IS NULL);
+
+CREATE POLICY audit_log_learning_insert ON audit_log
+  FOR INSERT TO orbexa_learning
+  WITH CHECK (action = 'lesson_published' AND resource_type = 'agent_version');
+
+CREATE POLICY document_chunks_learning_scrub ON document_chunks
+  FOR SELECT TO orbexa_learning
+  USING (deleted_at IS NULL);
+CREATE POLICY orgs_learning_scrub ON orgs
+  FOR SELECT TO orbexa_learning
+  USING (kind IN ('buyer', 'creator'));
+CREATE POLICY users_learning_scrub ON users
+  FOR SELECT TO orbexa_learning
+  USING (true);
+
+GRANT SELECT ON
+  agent_versions, agents, lesson_candidates, version_approvals, eval_runs,
+  consent_grants, org_memberships, memory_items, memory_snapshots, memory_snapshot_items,
+  document_chunks, orgs, users, processing_regions, cell_identity,
+  memory_provenance, job_grants
+  TO orbexa_learning;
+GRANT INSERT ON
+  memory_provenance, memory_items, memory_embeddings, memory_snapshots,
+  memory_snapshot_items, audit_log
+  TO orbexa_learning;
+GRANT UPDATE ON agent_versions, lesson_candidates TO orbexa_learning;
+GRANT USAGE, SELECT ON SEQUENCE audit_log_id_seq TO orbexa_learning;
+GRANT EXECUTE ON FUNCTION app.lesson_restriction(text, uuid) TO orbexa_learning;
+GRANT EXECUTE ON FUNCTION app.copies_buyer_document(text) TO orbexa_learning;
+GRANT EXECUTE ON FUNCTION app.version_visible(uuid, uuid, uuid) TO orbexa_learning;
+GRANT EXECUTE ON FUNCTION app.job_uses_agent(uuid, uuid, uuid) TO orbexa_learning;
+GRANT EXECUTE ON FUNCTION app.can_read_job(uuid, uuid) TO orbexa_learning;
+
+ALTER FUNCTION app.publish_learned_version(uuid, uuid, uuid, text) OWNER TO orbexa_learning;
+ALTER FUNCTION app.rollback_agent_version(uuid) OWNER TO orbexa_learning;
+ALTER FUNCTION app.lesson_restriction(text, uuid) OWNER TO orbexa_learning;
+ALTER FUNCTION app.copies_buyer_document(text) OWNER TO orbexa_learning;
+
 GRANT SELECT, INSERT ON learning_evidence, eval_suite_versions TO orbexa_app;
 GRANT SELECT, INSERT, UPDATE ON version_approvals TO orbexa_app;
 GRANT EXECUTE ON FUNCTION app.review_lesson_candidate(uuid, text) TO orbexa_app;
@@ -816,3 +968,5 @@ REVOKE ALL ON FUNCTION app.review_lesson_candidate(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.lesson_restriction(text, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.copies_buyer_document(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.classify_lesson(uuid, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.rollback_agent_version(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.rollback_agent_version(uuid) TO orbexa_app;
