@@ -76,7 +76,17 @@ importers:
         version: 8.73.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
 
   services/api:
+    dependencies:
+      '@orbexa/db':
+        specifier: workspace:*
+        version: link:../../packages/db
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: 0.5.17
+        version: 0.5.17
+      '@electric-sql/pglite-pgvector':
+        specifier: 0.0.18
+        version: 0.0.18(@electric-sql/pglite@0.5.17)
       '@eslint/js':
         specifier: ^9.39.1
         version: 9.39.5

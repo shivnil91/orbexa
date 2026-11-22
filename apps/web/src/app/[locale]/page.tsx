@@ -15,8 +15,8 @@ export default async function LocaleHome({ params }: { params: Promise<{ locale:
         <h1 className="text-3xl font-semibold tracking-tight">Orbexa foundation</h1>
         <p className="text-lg leading-8 text-zinc-600 dark:text-zinc-300">
           This screen is the engineering scaffold. Buyers and experts do not register here yet.
-          The first transaction is still Rahul buying a hospital-bed tender response from Moishin&apos;s
-          agent, with an editable Word file, an editable Excel matrix, and a ledger entry.
+          The local hospital-bed slice is Rahul buying Moishin&apos;s agent. It runs in tests and at
+          POST /v1/demo/hospital-beds on the API. It uses a fixture model and a fake payment adapter.
         </p>
       </header>
       <section className="grid gap-4 sm:grid-cols-3">

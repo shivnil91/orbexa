@@ -1,58 +1,58 @@
 # Engineering status
 
-Milestone 1 scaffold, checked on 2026-11-22. Commands below were run in this environment. Anything not listed was not run.
+Checked on 2026-11-22 after Milestone 2. Commands below were run in this environment. Anything not listed was not run.
 
-## What exists
+## What works
 
-- Architecture notes in `docs/`, including `docs/first-response.md` and `docs/agent-architecture.md`.
-- SQL migrations in `packages/db/migrations`, applied only inside the test process.
-- A Next.js page at `/en` and an API `GET /health`.
-- A Python worker skeleton that classifies uploads, checks claim citations, and runs a four-node LangGraph with no model call.
-- Terraform for a dev, staging, and prod cell. Validated. Not applied.
-- `docker-compose.yml` for Postgres with pgvector and the Temporal dev server. Not started. Docker is not installed here.
+A local hospital-bed transaction runs without AWS, Stripe, or a model API:
+
+- Moishin is inserted as a verified expert and the listing has Autonomous, Expert Verified, and Expert Led rows.
+- Rahul checks out Expert Verified through `FakePaymentProvider`. The webhook signature is verified. A second delivery of the same event does not post the ledger twice.
+- The ledger posts one USD transaction: platform fee, creator royalty, and review fee. Debits equal credits. A separate test posts JPY without mixing it into the USD transaction. A refund reversal balances.
+- The fixture model reads the fictional pack in `fixtures/hospital-beds`, extracts the capacity and certificate requirements, marks the certificate and the quantity as missing evidence, and cites 950 mm only because that width is in the supplier note.
+- Expert Verified waits for Moishin. After approval and Rahul's acceptance, `bid_docx` and `bid_xlsx` rows exist. The Python test rewrites both files and reads the edit back.
+- A rating is stored. A lesson candidate stays `proposed`.
+- Rahul's session does not see the other buyer's pricing chunk.
+- A payout to `processing` is rejected because there is no clear payout screening.
+- Selecting `PAYMENT_PROVIDER=stripe` throws. The end-to-end slice records `stripeCalls: 0`.
+- Selecting `LLM_PROVIDER=openai` throws, including when a dummy key is set. No HTTP client is called.
+- A Temporal Python SDK 1.36.1 test server runs a workflow that waits for an approve signal. The tender slice itself uses the in-process activity runner in `workers/ai/src/orbexa_ai/workflow.py`, not that server.
+
+`POST /v1/demo/hospital-beds` on the API repeats the slice and returned `reviewFeeMinor: "15000"`, `mentionsWidth: true`, `stripeCalls: 0`.
 
 ## What was run
 
 | Command | Result |
 | --- | --- |
-| `pnpm --filter @orbexa/db test` | Exit 0. 24 tests, 0 failed. Schema applied on PGlite 0.5.17, which reports PostgreSQL 18.7. |
-| `pnpm --filter @orbexa/db typecheck` | Exit 0. |
-| `pnpm --filter @orbexa/db lint` | Exit 0. |
-| `pnpm --filter @orbexa/api lint` | Exit 0. |
-| `pnpm --filter @orbexa/api typecheck` | Exit 0. |
-| `pnpm --filter @orbexa/api test` | Exit 0. 1 test. |
-| `pnpm --filter @orbexa/web test` | Exit 0. 3 tests. USD formats as `$10.50`. The same UTC instant renders on different civil dates in `Pacific/Auckland` and `Europe/London`. |
-| `pnpm --filter @orbexa/web lint` | Exit 0. |
-| `pnpm --filter @orbexa/web typecheck` | Exit 0. |
-| `workers/ai/.venv/bin/ruff check .` from `workers/ai` | `All checks passed!` |
-| `workers/ai/.venv/bin/mypy` from `workers/ai` | `Success: no issues found in 4 source files` |
-| `workers/ai/.venv/bin/pytest -q` from `workers/ai` | `5 passed` |
-| `pnpm audit --audit-level=high` | `No known vulnerabilities found` |
-| `pip-audit` after `pip install -U 'pip>=26.2'` | `No known vulnerabilities found`. The local package `orbexa-ai` is skipped because it is not on PyPI. Before the pip upgrade, pip 24.0 itself reported PYSEC advisories. |
-| `terraform version` | Terraform v1.10.5. Installed under `/tmp/tfbin` for this run. It is not a repo dependency. |
-| `terraform fmt -recursive infra` | Exit 0. |
-| `terraform init -backend=false` and `terraform validate` in `infra/envs/dev`, `staging`, and `prod` | `Success! The configuration is valid.` Provider resolved to `hashicorp/aws` v5.100.0. |
-| `curl http://127.0.0.1:43123/en` | HTTP 200. Body contains `Orbexa foundation` and `$10.50`. |
-| `curl -D - http://127.0.0.1:43123/` | HTTP 307 to `/en`. |
+| `pnpm --filter @orbexa/api test` | Exit 0. 8 tests, including the end-to-end slice. |
+| `pnpm --filter @orbexa/api lint` and `typecheck` | Exit 0. |
+| `pnpm --filter @orbexa/db test` | Exit 0. 24 tests. |
+| `pnpm --filter @orbexa/web test`, `lint`, `typecheck` | Exit 0. 3 tests. |
+| `ruff check .`, `mypy`, `pytest -q` in `workers/ai` | Ruff clean. mypy clean on 13 files. 14 tests passed. |
+| `pip-audit` | No known vulnerabilities. Local package `orbexa-ai` is skipped. |
+| `curl -X POST http://127.0.0.1:43124/v1/demo/hospital-beds` | HTTP 200 and the JSON summary above. |
+| `curl http://127.0.0.1:43123/en` | HTTP 200. Body mentions the fixture model. |
 | `curl http://127.0.0.1:43124/health` | `{"service":"orbexa-api","status":"ok"}` |
-| `curl http://127.0.0.1:43124/missing` | HTTP 404. |
-| `gh auth status` | Not logged in. |
-| `aws` | Not on `PATH`. |
 
-LangGraph resolved to 1.2.24. pytest 9.2.0, ruff 0.17.6, mypy 2.4.1.
+## What is stubbed
 
-## What was not done
+- Payments: `FakePaymentProvider` signs webhooks with HMAC-SHA256. `createStripeStub` throws on every method. Nothing in the slice imports a Stripe SDK and nothing is sent to Stripe.
+- Models: `FixtureGateway` is rule-based over the fictional pack. Anthropic, OpenAI, and xAI are `BlockedLiveGateway`. `complete` raises even if an env key is present.
+- Documents: generated PDF, DOCX, and XLSX under `fixtures/hospital-beds`. They are labeled fictional. There is no malware scanner service. `scan_upload` rejects unknown types and MZ/ELF bytes, and marks the fixture files clean.
+- Object storage: deliverable rows store a key and a hash. Bytes are not uploaded to S3. The editability test rewrites the bytes in process.
+- Workflow durability for the slice: in-process `WorkflowState.activity`. Temporal's test server is covered by `tests/test_temporal_gate.py` only. `docker compose` was not started. Docker is still not installed, so the Temporal dev server container was not run.
+- Expert verification uses `provider = 'test'` because the cell environment is `local`. That value is rejected outside local by the database trigger.
+- No Cognito login. The slice inserts users directly.
 
-- `docker compose up` was not run.
-- `terraform apply` and `terraform plan` were not run.
-- The migrate CLI was not pointed at a TCP Postgres.
-- No Stripe call. The connected account is the live ThirdRoc account.
-- No model API call. No provider key is provisioned.
-- GitHub Actions has not run. GitHub is not connected.
-- The hospital-bed transaction, chunker, Temporal worker, and payout adapter are not implemented. Their tests in the backlog are specifications, not results.
-- RLS was proved for `orbexa_app` and `orbexa_worker` on PGlite. It was not proved on the pg16 image named in Compose.
+## Defects
+
+- The slice runner and the Temporal workflow are two pieces. Killing a process mid-extract does not resume through Temporal. The in-process runner only deduplicates activities inside one process.
+- Deliverable files are not round-tripped through the database, only their metadata.
+- Schema tests and the slice still use PGlite (PostgreSQL 18.7), not the pg16 image in Compose.
+- The demo route has no authentication. It is a local fixture runner, not a buyer API.
+- Listing discovery is an SQL insert of a published listing, not a search UI.
 
 ## Servers left running
 
-- Web: `next dev` on port 43123.
-- API: `node` on port 43124.
+- Web on port 43123.
+- API on port 43124.

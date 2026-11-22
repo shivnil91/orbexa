@@ -17,6 +17,8 @@ Done in Milestone 1 means the schema, the test, or the document exists in this r
 
 ## Milestone 2 — Rahul's hospital-bed transaction
 
+The local slice now has passing tests. See `ENGINEERING_STATUS.md` for what is stubbed. These rows stay open where they still need a real provider or a UI.
+
 Dependency order matches section 5 of `docs/first-response.md`. Acceptance tests are the Given/When/Then list in section 7 of that file.
 
 | Item | Size | Acceptance |

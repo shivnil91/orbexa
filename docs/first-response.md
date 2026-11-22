@@ -190,7 +190,7 @@ These are assignments for later cloud agents. None of them were started as separ
 
 Rahul runs a pharmaceutical distribution business in Pacific markets. He is tendering to supply hospital beds. Moishin is the verified expert who owns the tender-writing agent. The slice ends when Rahul has an editable Word response and an editable Excel matrix, unsupported claims are flagged, and the ledger records the platform fee, creator royalty, and review fee. No certification, capacity, specification, or piece of evidence is invented.
 
-The acceptance tests below are the contract for Milestone 2. They are not yet automated end to end. The database tests in this milestone already cover the isolation, citation, ledger, payout-block, and eval-rollback parts.
+The acceptance tests below are the contract for Milestone 2. They are automated in `services/api/src/payments.test.ts`, `services/api/src/slice.e2e.test.ts`, and `workers/ai/tests/test_milestone2.py`. The database tests still cover citation rejection, payout blocking, and eval rollback.
 
 **Service level.** Given Moishin publishes Expert Verified at a stated currency, delivery days, two included revisions, and payout after the dispute window, when Rahul checks out, then the order stores those figures and `review_fee_minor > 0`. Given Autonomous, when the order is created, then `review_fee_minor = 0` and no expert approval is required.
 
