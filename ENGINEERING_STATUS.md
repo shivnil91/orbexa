@@ -1,6 +1,16 @@
 # Engineering status
 
-Checked on 2026-11-22 after the Milestone 2 defect fixes. Commands below were run in this environment. Anything not listed was not run.
+Checked on 2026-11-22 after the Milestone 4 work. Commands below were run in this environment. Anything not listed was not run.
+
+## Milestone 4, this run
+
+`pnpm lint`, `pnpm typecheck`, and `pnpm test` passed. `pnpm --filter @orbexa/db test:pg16` passed on PostgreSQL 16.15 with pgvector 0.6.0 (31 PGlite schema tests, 26 on Postgres 16). In `workers/ai`, ruff, mypy, and pytest passed (27 tests). No model API, Stripe API, or AWS API was called. `sk_live_` is refused at startup and is not stored in the repo. The penetration test was not performed. The restore drill is local: a logical chunk snapshot and a versioned directory. RDS and S3 were not restored. `infra/envs/prod-eu-central-1` was not applied.
+
+`GET /en` and `GET /en/dashboard` on the local Next dev server returned the foundation page and the fixture dashboard, including the line that the figures are not a live cell. `GET /fr/dashboard` returned 404.
+
+The sections below are the Milestone 2 record from the earlier check. They were not all re-run as a curl demo in this pass. The API slice test still runs the hospital-bed job.
+
+## Milestone 2 record
 
 ## What works
 

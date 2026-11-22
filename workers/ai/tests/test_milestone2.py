@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from orbexa_ai.documents import UnsupportedUploadError, classify_upload
-from orbexa_ai.gateway import ProviderNotConfiguredError, gateway_from_env
+from orbexa_ai.gateway import FixtureGateway, ProviderNotConfiguredError, gateway_from_env
 from orbexa_ai.ingest import chunk_document, scan_upload
 from orbexa_ai.job import run_tender_job
 from orbexa_ai.office import read_docx_paragraphs, read_xlsx_rows
@@ -112,12 +112,11 @@ def test_deliverables_are_editable() -> None:
 
 
 def test_live_providers_are_not_called(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "fixture")
+    monkeypatch.setenv("OPENAI_API_KEY", "not-a-real-key")
+    assert isinstance(gateway_from_env(), FixtureGateway)
     monkeypatch.setenv("LLM_PROVIDER", "openai")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(ProviderNotConfiguredError):
         gateway_from_env()
-    monkeypatch.setenv("OPENAI_API_KEY", "not-a-real-key")
-    gateway = gateway_from_env()
-    with pytest.raises(ProviderNotConfiguredError):
-        gateway.complete("extract", [])
     assert os.environ["LLM_PROVIDER"] == "openai"

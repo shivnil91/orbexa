@@ -8,7 +8,7 @@ resource "aws_vpc" "this" {
   enable_dns_hostnames = true
 
   tags = {
-    Name = "orbexa-${var.environment}"
+    Name = "orbexa-${local.cell_name}"
   }
 }
 
@@ -24,7 +24,7 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = false
 
   tags = {
-    Name = "orbexa-${var.environment}-public-${count.index}"
+    Name = "orbexa-${local.cell_name}-public-${count.index}"
   }
 }
 
@@ -35,7 +35,7 @@ resource "aws_subnet" "private" {
   availability_zone = data.aws_availability_zones.available.names[count.index]
 
   tags = {
-    Name = "orbexa-${var.environment}-private-${count.index}"
+    Name = "orbexa-${local.cell_name}-private-${count.index}"
   }
 }
 
@@ -82,7 +82,7 @@ resource "aws_route_table_association" "private" {
 }
 
 resource "aws_security_group" "alb" {
-  name   = "orbexa-${var.environment}-alb"
+  name   = "orbexa-${local.cell_name}-alb"
   vpc_id = aws_vpc.this.id
 
   ingress {
@@ -101,7 +101,7 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_security_group" "tasks" {
-  name   = "orbexa-${var.environment}-tasks"
+  name   = "orbexa-${local.cell_name}-tasks"
   vpc_id = aws_vpc.this.id
 
   ingress {
@@ -127,7 +127,7 @@ resource "aws_security_group" "tasks" {
 }
 
 resource "aws_security_group" "database" {
-  name   = "orbexa-${var.environment}-db"
+  name   = "orbexa-${local.cell_name}-db"
   vpc_id = aws_vpc.this.id
 }
 
@@ -157,7 +157,7 @@ resource "aws_lb_listener" "http" {
 }
 
 resource "aws_lb" "this" {
-  name               = "orbexa-${var.environment}"
+  name               = "orbexa-${local.cell_name}"
   load_balancer_type = "application"
   internal           = false
   security_groups    = [aws_security_group.alb.id]
@@ -165,7 +165,7 @@ resource "aws_lb" "this" {
 }
 
 resource "aws_wafv2_web_acl" "this" {
-  name  = "orbexa-${var.environment}"
+  name  = "orbexa-${local.cell_name}"
   scope = "REGIONAL"
 
   default_action {
@@ -189,14 +189,14 @@ resource "aws_wafv2_web_acl" "this" {
 
     visibility_config {
       cloudwatch_metrics_enabled = true
-      metric_name                = "orbexa-${var.environment}-common"
+      metric_name                = "orbexa-${local.cell_name}-common"
       sampled_requests_enabled   = true
     }
   }
 
   visibility_config {
     cloudwatch_metrics_enabled = true
-    metric_name                = "orbexa-${var.environment}"
+    metric_name                = "orbexa-${local.cell_name}"
     sampled_requests_enabled   = true
   }
 }
@@ -207,7 +207,7 @@ resource "aws_wafv2_web_acl_association" "alb" {
 }
 
 resource "aws_cloudwatch_log_group" "app" {
-  name              = "/orbexa/${var.environment}/app"
+  name              = "/orbexa/${local.cell_name}/app"
   retention_in_days = var.environment == "prod" ? 90 : 14
 }
 
@@ -217,7 +217,7 @@ resource "aws_kms_key" "data" {
 }
 
 resource "aws_s3_bucket" "documents" {
-  bucket_prefix = "orbexa-${var.environment}-docs-"
+  bucket_prefix = "orbexa-${local.cell_name}-docs-"
 }
 
 resource "aws_s3_bucket_public_access_block" "documents" {
@@ -249,11 +249,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "documents" {
 }
 
 resource "aws_sqs_queue" "dead_letter" {
-  name = "orbexa-${var.environment}-work-dlq"
+  name = "orbexa-${local.cell_name}-work-dlq"
 }
 
 resource "aws_sqs_queue" "work" {
-  name = "orbexa-${var.environment}-work"
+  name = "orbexa-${local.cell_name}-work"
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.dead_letter.arn
@@ -262,22 +262,22 @@ resource "aws_sqs_queue" "work" {
 }
 
 resource "aws_secretsmanager_secret" "api" {
-  name       = "orbexa/${var.environment}/api/runtime"
+  name       = "orbexa/${local.cell_name}/api/runtime"
   kms_key_id = aws_kms_key.data.arn
 }
 
 resource "aws_secretsmanager_secret" "worker" {
-  name       = "orbexa/${var.environment}/worker/runtime"
+  name       = "orbexa/${local.cell_name}/worker/runtime"
   kms_key_id = aws_kms_key.data.arn
 }
 
 resource "aws_db_subnet_group" "this" {
-  name       = "orbexa-${var.environment}"
+  name       = "orbexa-${local.cell_name}"
   subnet_ids = aws_subnet.private[*].id
 }
 
 resource "aws_db_instance" "postgres" {
-  identifier                  = "orbexa-${var.environment}"
+  identifier                  = "orbexa-${local.cell_name}"
   engine                      = "postgres"
   engine_version              = "16"
   instance_class              = var.db_instance_class
@@ -294,11 +294,11 @@ resource "aws_db_instance" "postgres" {
   publicly_accessible         = false
   backup_retention_period     = var.environment == "prod" ? 35 : 7
   skip_final_snapshot         = var.environment != "prod"
-  final_snapshot_identifier   = var.environment == "prod" ? "orbexa-${var.environment}-final" : null
+  final_snapshot_identifier   = var.environment == "prod" ? "orbexa-${local.cell_name}-final" : null
 }
 
 resource "aws_cognito_user_pool" "this" {
-  name = "orbexa-${var.environment}"
+  name = "orbexa-${local.cell_name}"
 
   username_attributes = ["email"]
   mfa_configuration   = "OPTIONAL"
@@ -338,7 +338,7 @@ data "aws_iam_policy_document" "ecs_assume" {
 }
 
 resource "aws_iam_role" "execution" {
-  name               = "orbexa-${var.environment}-execution"
+  name               = "orbexa-${local.cell_name}-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
 }
 
@@ -348,12 +348,12 @@ resource "aws_iam_role_policy_attachment" "execution" {
 }
 
 resource "aws_iam_role" "api" {
-  name               = "orbexa-${var.environment}-api"
+  name               = "orbexa-${local.cell_name}-api"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
 }
 
 resource "aws_iam_role" "worker" {
-  name               = "orbexa-${var.environment}-worker"
+  name               = "orbexa-${local.cell_name}-worker"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
 }
 
@@ -401,22 +401,25 @@ data "aws_iam_policy_document" "worker" {
 }
 
 resource "aws_iam_role_policy" "api" {
-  name   = "orbexa-${var.environment}-api"
+  name   = "orbexa-${local.cell_name}-api"
   role   = aws_iam_role.api.id
   policy = data.aws_iam_policy_document.api.json
 }
 
 resource "aws_iam_role_policy" "worker" {
-  name   = "orbexa-${var.environment}-worker"
+  name   = "orbexa-${local.cell_name}-worker"
   role   = aws_iam_role.worker.id
   policy = data.aws_iam_policy_document.worker.json
 }
 
 resource "aws_ecs_cluster" "this" {
-  name = "orbexa-${var.environment}"
+  name = "orbexa-${local.cell_name}"
 }
 
 locals {
+  # Empty cell_name keeps the historical environment prefix. A second region
+  # sets its own name. This module does not copy tenants or replicate buckets.
+  cell_name = var.cell_name != "" ? var.cell_name : var.environment
   services = {
     web = {
       cpu    = var.web_cpu
@@ -441,7 +444,7 @@ locals {
 
 resource "aws_ecs_task_definition" "service" {
   for_each                 = local.services
-  family                   = "orbexa-${var.environment}-${each.key}"
+  family                   = "orbexa-${local.cell_name}-${each.key}"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = tostring(each.value.cpu)

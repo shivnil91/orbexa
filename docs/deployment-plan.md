@@ -31,7 +31,7 @@ Actions are pinned to commit SHAs recorded in the workflow file.
 
 ## Backups
 
-RDS automated backups: 7 days in dev and staging, 35 in prod, as set in the Terraform. Snapshots stay in the region. Copying them to another region is a residency decision, not a default. S3 versioning is on. A restore drill is a Milestone 4 task. It has not been done.
+RDS automated backups: 7 days in dev and staging, 35 in prod, as set in the Terraform. Snapshots stay in the region. Copying them to another region is a residency decision, not a default. S3 versioning is on. Milestone 4 runs a local restore drill against Postgres and a versioned directory and writes the timing in the test result. An RDS point-in-time restore and an S3 `get-object` by version id have not been executed. See `docs/m4-runbooks.md`.
 
 ## Monitoring
 

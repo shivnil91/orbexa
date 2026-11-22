@@ -61,6 +61,20 @@ No fine-tuning. No reuse of confidential text without the consent row.
 | Dashboards | M | Grounded-claim rate, latency, cost per job, revision rate, by agent version. Built from `run_metrics` and `llm_invocations`. |
 | BM25 swap and reranker | M | Same function signature. Measured change on the golden suite. |
 | Second region | L | New cell. Tenants are not copied across regions by default. |
+| Vertical packs | M | Core commerce is category-agnostic. A specialist is a `vertical_revisions` row: intake schema, deliverable types, rubric, and workflow. Tender rules live in the tender pack. |
+
+The founder added the vertical-pack row to this milestone. See ADR 0009. A new category does not require a migration. Custom model behavior beyond the declared stage list still requires a pack module.
+
+What landed in the repository, and what did not:
+
+- Restore: local logical snapshot and versioned object drill, with a timing. RDS and S3 were not restored.
+- Reconciliation: sandbox-day comparison pages a human on mismatch. No live charge.
+- Load and abuse: budget and rate limit stop a runaway job. The WAF resource is `AWSManagedRulesCommonRuleSet`. No production load test.
+- Privacy: export and delete on a fixture org. Ledger amounts remain. Document text is redacted in this cell.
+- Penetration test: not performed. No certification is claimed. See `docs/m4-runbooks.md`.
+- Dashboards: `app.agent_version_metrics` and a fixture page at `/en/dashboard`.
+- BM25: same `app.retrieve_chunks` signature, selected with `app.lexical_scorer`. Worker rerank is phrase overlap. The golden-suite measurement is synthetic.
+- Second region: `infra/envs/prod-eu-central-1`. Not applied. No tenant copy.
 
 ## Explicitly later
 

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -20,6 +21,7 @@ from temporalio.runtime import (
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
+from orbexa_ai.startup import refuse_live_stripe_keys
 from orbexa_ai.tender_activities import (
     deliver_activity,
     draft_activity,
@@ -82,6 +84,7 @@ async def run_on_temporal(files: dict[str, bytes], service_level: str) -> dict[s
 
 
 def main() -> None:
+    refuse_live_stripe_keys(os.environ)
     request = json.load(sys.stdin)
     files = {name: base64.b64decode(encoded) for name, encoded in request["files"].items()}
     result = asyncio.run(run_on_temporal(files, str(request["service_level"])))

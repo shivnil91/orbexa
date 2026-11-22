@@ -1,7 +1,10 @@
 import { createServer } from "node:http";
 import { healthBody } from "./health.ts";
+import { assertNoLiveStripeKey } from "./payments/guard.ts";
 import { route } from "./routes.ts";
 import { hospitalBedSummary } from "./slice.ts";
+
+assertNoLiveStripeKey(process.env);
 
 const port = Number(process.env.PORT ?? 43124);
 const env = process.env.ORBEXA_ENV;
