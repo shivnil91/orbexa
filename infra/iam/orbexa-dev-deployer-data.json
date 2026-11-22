@@ -184,6 +184,16 @@
       ]
     },
     {
+      "Sid": "ReadDevSecretMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetResourcePolicy",
+        "secretsmanager:ListSecretVersionIds"
+      ],
+      "Resource": "arn:aws:secretsmanager:ap-southeast-2:486726633485:secret:orbexa/dev/*"
+    },
+    {
       "Sid": "RdsManagedPasswordRotation",
       "Effect": "Allow",
       "Action": "secretsmanager:RotateSecret",

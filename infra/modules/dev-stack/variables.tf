@@ -1,3 +1,14 @@
+variable "db_backup_retention_days" {
+  type        = number
+  description = "Automated RDS backup retention in days. The AWS Free plan maximum is 1. Set 0 only if 1 is still rejected."
+  default     = 1
+
+  validation {
+    condition     = var.db_backup_retention_days >= 0 && var.db_backup_retention_days <= 35
+    error_message = "db_backup_retention_days must be from 0 to 35. The Free plan allows at most 1."
+  }
+}
+
 variable "budget_email" {
   type        = string
   description = "Inbox that confirms the US$20 and US$50 budget alarms. Not an example.com address."

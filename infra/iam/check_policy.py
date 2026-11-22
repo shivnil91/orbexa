@@ -142,6 +142,10 @@ def main() -> int:
     if "pull_request" in dev_text:
         errors.append("dev stack mentions pull_request in the OIDC trust")
 
+    data_policy = (IAM_DIR / "orbexa-dev-deployer-data.json").read_text()
+    if "secretsmanager:GetResourcePolicy" not in data_policy:
+        errors.append("data policy is missing secretsmanager:GetResourcePolicy")
+
     for env in ("staging", "prod"):
         guard = (ROOT / "infra" / "envs" / env / "account_guard.tf").read_text()
         if ACCOUNT not in guard or "!=" not in guard:

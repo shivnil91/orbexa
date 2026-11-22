@@ -114,7 +114,7 @@ terraform plan -var-file=dev.tfvars -out=tfplan
 
 Read the plan. Apply only if all of these are true:
 
-- `aws_db_instance.postgres` is `db.t4g.micro`, `multi_az` false, `publicly_accessible` false.
+- `aws_db_instance.postgres` is `db.t4g.micro`, `multi_az` false, `publicly_accessible` false, `backup_retention_period` 1, and `max_allocated_storage` 20.
 - There is no `aws_nat_gateway`, no `aws_eip`, and no `aws_lb`.
 - `aws_ecs_service.app` has `desired_count` 0.
 - The three `aws_secretsmanager_secret` resources have no `aws_secretsmanager_secret_version`.
@@ -197,7 +197,29 @@ Start it again with `aws rds start-db-instance` and the same identifier. A Terra
 
 The database has deletion protection. To destroy the dev stack, set deletion protection to false in `infra/modules/dev-stack/main.tf`, apply, then destroy. The state bucket and lock table refuse `terraform destroy` until `prevent_destroy` is removed. Empty the bucket first.
 
-## 10. Monthly cost
+## 10. Re-apply after a partial apply
+
+The first apply can create the network, the secret shells, and the user pool, then stop. Before running apply again:
+
+1. In **IAM → Policies**, open `orbexa-dev-deployer-data`, choose **Edit**, replace the JSON with the current `infra/iam/orbexa-dev-deployer-data.json`, and save. The other two deployer policies did not change. The live policy is what the deployer uses. The file in git does not update it.
+2. In `dev.tfvars`, leave `db_backup_retention_days` at `1`.
+3. `terraform plan -var-file=dev.tfvars -out=tfplan`, then `terraform apply tfplan`.
+
+The plan should refresh the three `orbexa/dev/*` secrets, create `aws_db_instance.postgres`, and update the Cognito user pool. It should not add a NAT gateway or a load balancer. If Cognito reports that `orbexa-dev` already exists and is not in state, delete that empty pool in the Cognito console and apply again.
+
+If RDS still returns `FreeTierRestrictionError` for the backup retention, set `db_backup_retention_days = 0` and apply again. That turns automated backups off. `0` is the only shorter value.
+
+Free-plan limits checked against this stack, besides the backup retention:
+
+| Item | This stack |
+| --- | --- |
+| RDS class | `db.t4g.micro` only. The deployer policy denies any other class. The Free plan allows one micro instance. |
+| Storage | 20 GB gp3, and `max_allocated_storage` 20, so autoscaling cannot grow past the Free plan storage cap. |
+| Multi-AZ, read replica, RDS Proxy, Performance Insights, enhanced monitoring | Off. Proxy and Aurora are blocked on the Free plan, and this stack creates neither. |
+| Cognito MFA | Optional authenticator (TOTP) only. No SMS and no SES. |
+| Secrets | Metadata reads are allowed. Secret values stay denied. |
+
+## 11. Monthly cost
 
 US dollars, list price, 730-hour month, before tax. This is an estimate, not a quote. Re-check the AWS Pricing Calculator for `ap-southeast-2` before relying on it. Model invoices and Stripe fees are not on this bill and are not paid by these credits.
 

@@ -31,7 +31,7 @@ Actions are pinned to commit SHAs recorded in the workflow file.
 
 ## Backups
 
-RDS automated backups: 7 days in dev and staging, 35 in prod, as set in the Terraform. Snapshots stay in the region. Copying them to another region is a residency decision, not a default. S3 versioning is on. A restore drill is a Milestone 4 task. It has not been done.
+RDS automated backups: 1 day in dev, because the Free plan rejects a longer retention, 7 days in staging, 35 in prod, as set in the Terraform. Snapshots stay in the region. Copying them to another region is a residency decision, not a default. S3 versioning is on. A restore drill is a Milestone 4 task. It has not been done.
 
 ## Monitoring
 

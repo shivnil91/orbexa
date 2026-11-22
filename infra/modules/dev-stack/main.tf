@@ -345,7 +345,7 @@ resource "aws_db_instance" "postgres" {
   instance_class = "db.t4g.micro"
 
   allocated_storage     = 20
-  max_allocated_storage = 30
+  max_allocated_storage = 20
   storage_type          = "gp3"
   storage_encrypted     = true
 
@@ -359,7 +359,7 @@ resource "aws_db_instance" "postgres" {
 
   multi_az                     = false
   publicly_accessible          = false
-  backup_retention_period      = 7
+  backup_retention_period      = var.db_backup_retention_days
   backup_window                = "17:00-18:00"
   maintenance_window           = "sun:18:00-sun:19:00"
   copy_tags_to_snapshot        = true
@@ -380,6 +380,12 @@ resource "aws_cognito_user_pool" "this" {
 
   username_attributes = ["email"]
   mfa_configuration   = "OPTIONAL"
+
+  # TOTP only. OPTIONAL is rejected unless at least one factor is enabled,
+  # and SMS or email MFA would need SNS or SES.
+  software_token_mfa_configuration {
+    enabled = true
+  }
 
   password_policy {
     minimum_length = 12

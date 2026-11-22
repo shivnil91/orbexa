@@ -1,3 +1,9 @@
+variable "db_backup_retention_days" {
+  type        = number
+  description = "Automated RDS backup retention in days. Free plan maximum is 1."
+  default     = 1
+}
+
 variable "budget_email" {
   type        = string
   description = "Inbox for the US$20 and US$50 budget alarms."

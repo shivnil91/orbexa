@@ -1,5 +1,8 @@
 budget_email = "you@example.com"
 
+# AWS Free plan maximum. Set 0 only if an apply still returns FreeTierRestrictionError.
+db_backup_retention_days = 1
+
 # Public IP of the laptop that will call the API, with /32.
 # Leave this empty until you need ingress. 0.0.0.0/0 is rejected.
 api_ingress_cidrs = []
