@@ -471,6 +471,35 @@ test("later agent versions cannot publish unless the eval improves, and rollback
     INSERT INTO eval_runs (agent_version_id, suite_id, passed, score)
     VALUES ('abababab-abab-4aba-8aba-abababababab', '${suite.rows[0].id}', true, 0.55)
   `);
+  await db.exec("SELECT set_config('app.learning_publish', '1', false)");
+  await db.exec("SELECT set_config('app.rollback', '1', false)");
+  await assert.rejects(
+    db.exec(`
+      UPDATE agent_versions SET status = 'published', published_at = now()
+      WHERE id = 'abababab-abab-4aba-8aba-abababababab'
+    `),
+    /creator approval/i,
+  );
+  await db.exec("SELECT set_config('app.learning_publish', '', false)");
+  await db.exec("SELECT set_config('app.rollback', '', false)");
+  const candidate = await db.query<{ id: string }>(`
+    INSERT INTO lesson_candidates (
+      tenant_id, home_region, source_job_id, proposed_text, status, permission_class, scrub_status
+    ) VALUES (
+      '${buyerA}', 'local', '${jobA}',
+      'When a requested certificate is absent from the supplier notes, mark the claim missing_evidence and do not invent one.',
+      'proposed', 'same_region_abstracted', 'clear'
+    ) RETURNING id
+  `);
+  await db.exec(`
+    INSERT INTO version_approvals (
+      creator_org_id, agent_version_id, candidate_id, scrubbed_text, status, actor_user_id
+    ) VALUES (
+      '${creator}', 'abababab-abab-4aba-8aba-abababababab', '${candidate.rows[0].id}',
+      'When a requested certificate is absent from the supplier notes, mark the claim missing_evidence and do not invent one.',
+      'approved', '${userA}'
+    )
+  `);
   await db.exec(`
     UPDATE agent_versions SET status = 'published', published_at = now()
     WHERE id = 'abababab-abab-4aba-8aba-abababababab'

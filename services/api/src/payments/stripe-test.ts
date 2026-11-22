@@ -19,6 +19,21 @@ export type StripeTestProvider = PaymentProvider & {
   fetchBalanceTransactions(day: string): Promise<string>;
 };
 
+function refundIncrement(
+  object: Record<string, unknown>,
+  previous: { amount_refunded?: unknown } | undefined,
+): number {
+  const cumulative = object.amount_refunded ?? object.amount;
+  if (typeof cumulative !== "number") {
+    return cumulative as number;
+  }
+  const prior = previous?.amount_refunded;
+  if (typeof prior !== "number") {
+    return cumulative;
+  }
+  return cumulative - prior;
+}
+
 function assertTestKey(secretKey: string): void {
   if (secretKey.includes("sk_live_") || !secretKey.startsWith("sk_test_")) {
     throw new Error("Stripe test adapter requires a test secret key");
@@ -101,11 +116,20 @@ export function createStripeTestProvider(options: {
       const parsed = JSON.parse(body) as {
         id?: string;
         type?: string;
-        data?: { object?: Record<string, unknown> };
+        data?: {
+          object?: Record<string, unknown>;
+          previous_attributes?: { amount_refunded?: unknown };
+        };
       };
       const object = parsed.data?.object ?? {};
       if (object.livemode === true) {
         throw new Error("live mode webhook rejected");
+      }
+      if (parsed.type === "checkout.session.completed" && object.payment_status !== "paid") {
+        throw new Error("Stripe test checkout is not paid");
+      }
+      if (parsed.type === "refund.updated" && object.status !== "succeeded") {
+        throw new Error("Stripe test refund is not succeeded");
       }
       const metadata = (object.metadata ?? {}) as Record<string, string>;
       const captures = new Set([
@@ -123,7 +147,7 @@ export function createStripeTestProvider(options: {
         throw new Error("Stripe test webhook type is not a capture or refund");
       }
       const rawAmount = eventType === "refund.succeeded"
-        ? object.amount_refunded ?? object.amount
+        ? refundIncrement(object, parsed.data?.previous_attributes)
         : object.amount_total ?? object.amount;
       if (typeof rawAmount !== "number" || !Number.isInteger(rawAmount) || rawAmount < 0) {
         throw new Error("Stripe test webhook amount is not a non-negative integer");

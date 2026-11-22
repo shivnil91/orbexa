@@ -125,6 +125,7 @@ test("a stripe test webhook signature is checked and the split is not invented",
         amount_total: 1000,
         currency: "usd",
         livemode: false,
+        payment_status: "paid",
         client_reference_id: "order-1",
         metadata: {
           platform_fee_minor: "150",
@@ -144,7 +145,7 @@ test("a stripe test webhook signature is checked and the split is not invented",
   const unsignedSplit = JSON.stringify({
     id: "evt_test_2",
     type: "checkout.session.completed",
-    data: { object: { amount_total: 1, currency: "usd", livemode: false } },
+    data: { object: { amount_total: 1, currency: "usd", livemode: false, payment_status: "paid" } },
   });
   assert.throws(() => provider.verifyWebhook(unsignedSplit, sign(unsignedSplit)), /ledger split/);
   const failed = JSON.stringify({
@@ -178,6 +179,39 @@ test("a stripe test webhook signature is checked and the split is not invented",
   });
   assert.throws(() => provider.verifyWebhook(live, sign(live)), /live mode/);
   assert.throws(() => provider.verifyWebhook(body, sign(body, "1700000000")), /timestamp/);
+  const unpaid = JSON.stringify({
+    id: "evt_test_6",
+    type: "checkout.session.completed",
+    data: { object: { amount_total: 1000, currency: "usd", livemode: false, payment_status: "unpaid", metadata: {
+      platform_fee_minor: "0", creator_royalty_minor: "1000", review_fee_minor: "0", tax_minor: "0",
+    } } },
+  });
+  assert.throws(() => provider.verifyWebhook(unpaid, sign(unpaid)), /not paid/);
+  const pendingRefund = JSON.stringify({
+    id: "evt_test_7",
+    type: "refund.updated",
+    data: { object: { amount: 100, currency: "usd", livemode: false, status: "pending", metadata: {
+      platform_fee_minor: "0", creator_royalty_minor: "100", review_fee_minor: "0", tax_minor: "0",
+    } } },
+  });
+  assert.throws(() => provider.verifyWebhook(pendingRefund, sign(pendingRefund)), /not succeeded/);
+  const secondPartial = JSON.stringify({
+    id: "evt_test_8",
+    type: "charge.refunded",
+    data: {
+      object: {
+        amount: 1000,
+        amount_refunded: 500,
+        currency: "usd",
+        livemode: false,
+        metadata: {
+          platform_fee_minor: "0", creator_royalty_minor: "250", review_fee_minor: "0", tax_minor: "0",
+        },
+      },
+      previous_attributes: { amount_refunded: 250 },
+    },
+  });
+  assert.equal(provider.verifyWebhook(secondPartial, sign(secondPartial)).amountMinor, 250n);
 });
 
 test("versioned object restore reads the prior chunk and redaction removes it", () => {

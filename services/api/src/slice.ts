@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite-pgvector";
+import { closeJobLearning } from "@orbexa/db/learning.ts";
 import { splitServiceAmount } from "@orbexa/db/money.ts";
 import { loadMigrations } from "@orbexa/db/migrations.ts";
 import { persistWebhook, type Sql } from "./ledger.ts";
@@ -209,14 +210,7 @@ export async function runHospitalBedSlice(): Promise<SliceReport> {
     INSERT INTO payout_obligations (order_id, payee_org_id, home_region, kind, currency, amount_minor)
     VALUES ('${orderId}', '${creator}', 'local', 'creator_royalty', 'USD', ${split.creatorRoyaltyMinor})
   `);
-  await db.exec(`
-    INSERT INTO lesson_candidates (tenant_id, home_region, source_job_id, proposed_text, status)
-    VALUES (
-      '${buyer}', 'local', '${jobId}',
-      'When a certificate is absent, flag missing evidence.',
-      'proposed'
-    )
-  `);
+  await closeJobLearning(db, jobId);
   await insertOtherBuyerSecret(db);
   return {
     db,
