@@ -1,0 +1,7 @@
+{
+  "code": "missing-certificate",
+  "fixtureKind": "synthetic",
+  "expectation": "missing_evidence",
+  "rubric": ["grounded_claim", "missing_evidence"],
+  "task": "A synthetic invitation requires a regulatory certificate. The synthetic note does not contain one."
+}

@@ -74,6 +74,8 @@ class LiveHttpGateway:
         transport: HttpTransport | None = None,
         budget: RunBudget | None = None,
         model: str | None = None,
+        prompt_cache: bool = False,
+        prompt_cache_key: str | None = None,
     ) -> None:
         if provider not in ("anthropic", "openai"):
             raise ProviderError(f"unsupported live provider {provider}")
@@ -84,6 +86,10 @@ class LiveHttpGateway:
         self.transport = transport or urllib_transport
         self.budget = budget
         self.model = model or ("claude-haiku-4-5" if provider == "anthropic" else "gpt-4.1-mini")
+        # Vendor prompt-cache fields stay off until a provider contract is set.
+        self.prompt_cache = prompt_cache
+        self.prompt_cache_key = prompt_cache_key
+        self.last_usage: tuple[int, int] = (0, 0)
 
     def complete(self, task: str, chunks: list[Chunk]) -> dict[str, Any]:
         if self.budget is not None:
@@ -92,6 +98,10 @@ class LiveHttpGateway:
         response = self.transport(method, url, headers, body)
         if response.status < 200 or response.status >= 300:
             raise ProviderError(f"{self.provider} returned HTTP {response.status}")
+        parsed = json.loads(response.body)
+        if not isinstance(parsed, dict):
+            raise ProviderError("model response was not an object")
+        self.last_usage = _usage(self.provider, parsed)
         return _parse_completion(self.provider, response.body)
 
     def _request(
@@ -101,11 +111,19 @@ class LiveHttpGateway:
     ) -> tuple[str, str, dict[str, str], bytes]:
         prompt = _instruction(task) + "\n" + _document(chunks)
         if self.provider == "anthropic":
-            payload = {
+            payload: dict[str, Any] = {
                 "model": self.model,
                 "max_tokens": 1024,
                 "messages": [{"role": "user", "content": prompt}],
             }
+            if self.prompt_cache:
+                payload["system"] = [
+                    {
+                        "type": "text",
+                        "text": _instruction(task),
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
             return (
                 "POST",
                 "https://api.anthropic.com/v1/messages",
@@ -121,6 +139,8 @@ class LiveHttpGateway:
             "messages": [{"role": "user", "content": prompt}],
             "response_format": {"type": "json_object"},
         }
+        if self.prompt_cache and self.prompt_cache_key:
+            payload["prompt_cache_key"] = self.prompt_cache_key
         return (
             "POST",
             "https://api.openai.com/v1/chat/completions",
@@ -130,6 +150,15 @@ class LiveHttpGateway:
             },
             json.dumps(payload).encode("utf-8"),
         )
+
+
+def _usage(provider: str, parsed: dict[str, Any]) -> tuple[int, int]:
+    usage = parsed.get("usage")
+    if not isinstance(usage, dict):
+        return (0, 0)
+    if provider == "anthropic":
+        return (int(usage.get("input_tokens") or 0), int(usage.get("output_tokens") or 0))
+    return (int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0))
 
 
 def _parse_completion(provider: str, body: str) -> dict[str, Any]:

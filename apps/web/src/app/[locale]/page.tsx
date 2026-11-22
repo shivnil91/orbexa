@@ -1,5 +1,8 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { formatInstant, formatMoney } from "@/lib/format";
+import { listings, lowestTier } from "@/lib/catalog";
+import { formatMoney } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { isSupportedLocale } from "@/lib/locale";
 
 export default async function LocaleHome({ params }: { params: Promise<{ locale: string }> }) {
@@ -7,54 +10,37 @@ export default async function LocaleHome({ params }: { params: Promise<{ locale:
   if (!isSupportedLocale(locale)) {
     notFound();
   }
-
+  const listing = listings[0];
+  const from = lowestTier(listing);
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-5 py-12 sm:px-8">
-      <header className="flex flex-col gap-3">
-        <p className="text-sm font-medium tracking-wide text-zinc-500">Tender writing</p>
-        <h1 className="text-3xl font-semibold tracking-tight">Orbexa foundation</h1>
-        <p className="text-lg leading-8 text-zinc-600 dark:text-zinc-300">
-          This screen is the engineering scaffold. Buyers and experts do not register here yet.
-          A specialist category is a vertical pack: intake form, deliverable types, rubric, and
-          workflow. The local hospital-bed slice is the first pack, Rahul buying Moishin&apos;s agent.
-          It runs in tests and at POST /v1/demo/hospital-beds on the API. It uses a fixture model
-          and a fake payment adapter.
-        </p>
+    <main id="content" className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-12 sm:px-8">
+      <header className="max-w-3xl">
+        <p className="text-sm font-medium text-muted">{t(locale, "home.eyebrow")}</p>
+        <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">{t(locale, "home.title")}</h1>
+        <p className="mt-4 text-lg leading-8 text-muted">{t(locale, "home.lede")}</p>
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <Link className="inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-5 text-accent-foreground" href={`/${locale}/listings/${listing.slug}`}>
+            {t(locale, "home.primary")}
+          </Link>
+          <Link className="inline-flex min-h-11 items-center justify-center rounded-full border border-line px-5" href={`/${locale}/dashboard`}>
+            {t(locale, "home.secondary")}
+          </Link>
+        </div>
       </header>
-      <section className="grid gap-4 sm:grid-cols-3">
-        <article className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-          <h2 className="font-medium">Three service levels</h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            Autonomous, Expert Verified, and Expert Led. Price, timeline, revisions, cancellation,
-            and payout release are fields on the listing, not hardcoded currencies.
-          </p>
-        </article>
-        <article className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-          <h2 className="font-medium">Four memory domains</h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            Creator expertise, buyer-private context, execution scratch, and approved reusable
-            intelligence. Retrieval is tenant-scoped in Postgres.
-          </p>
-        </article>
-        <article className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-          <h2 className="font-medium">One cell until approved</h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            The schema is global. Deploying a region, spending money, or taking a live payment
-            waits for an explicit founder approval.
-          </p>
-        </article>
+      <section className="grid gap-4 md:grid-cols-3">
+        {(["home.step1", "home.step2", "home.step3"] as const).map((key) => (
+          <article key={key} className="rounded-2xl border border-line bg-surface p-5">
+            <h2 className="text-lg font-medium">{t(locale, `${key}.title`)}</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">{t(locale, `${key}.body`)}</p>
+          </article>
+        ))}
       </section>
-      <p className="text-sm">
-        <a className="underline" href={`/${locale}/dashboard`}>
-          Agent version dashboard
-        </a>
-      </p>
-      <section className="rounded-lg bg-zinc-50 p-4 text-sm leading-6 dark:bg-zinc-900">
-        <h2 className="font-medium">Sample formatting, not a price</h2>
-        <p className="mt-2">USD in en-US: {formatMoney(BigInt(1050), "USD", "en-US")}</p>
-        <p>EUR in de-DE: {formatMoney(BigInt(1050), "EUR", "de-DE")}</p>
-        <p>Same instant in Auckland: {formatInstant("Pacific/Auckland", "en-NZ")}</p>
-        <p>Same instant in London: {formatInstant("Europe/London", "en-GB")}</p>
+      <section className="rounded-2xl border border-line p-5">
+        <h2 className="text-lg font-medium">{t(locale, "home.memory.title")}</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">{t(locale, "home.memory.body")}</p>
+        <p className="mt-4 text-sm">
+          {listing.title}: {t(locale, "listings.from", { price: formatMoney(BigInt(from.priceMinor), from.currency, locale) })}
+        </p>
       </section>
     </main>
   );

@@ -75,12 +75,34 @@ async def run_on_temporal(files: dict[str, bytes], service_level: str) -> dict[s
                     id=f"tender-{payload['job_id']}",
                     task_queue="orbexa-tender",
                 )
-                if service_level != "autonomous":
-                    await handle.signal(TenderJob.approve)
-                result = await handle.result()
+                # Expert levels wait for the approve signal. This process does not send it.
+                if service_level == "autonomous":
+                    result = await handle.result()
+                else:
+                    result = await _wait_for_review(handle)
                 if not isinstance(result, dict):
                     raise TypeError("workflow result")
                 return result
+
+
+async def _wait_for_review(handle: object) -> dict[str, object]:
+    """Poll the workflow until it is waiting for a person. Do not signal approve."""
+    query = getattr(handle, "query")
+    last = "running"
+    for _ in range(400):
+        try:
+            snap = await query(TenderJob.snapshot)
+        except Exception:
+            await asyncio.sleep(0.05)
+            continue
+        if isinstance(snap, dict):
+            last = str(snap.get("status", last))
+            if last == "waiting_for_expert":
+                return {str(key): value for key, value in snap.items()}
+        await asyncio.sleep(0.05)
+    raise TimeoutError(
+        f"expert review was not reached (last status {last}); the CLI does not approve it"
+    )
 
 
 def main() -> None:

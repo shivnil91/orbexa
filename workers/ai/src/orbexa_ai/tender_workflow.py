@@ -25,6 +25,7 @@ _RETRY = RetryPolicy(
 class TenderJob:
     def __init__(self) -> None:
         self.approved = False
+        self._snapshot: dict[str, Any] = {"status": "running"}
 
     @workflow.run
     async def run(self, payload: dict[str, str]) -> dict[str, Any]:
@@ -51,8 +52,6 @@ class TenderJob:
             start_to_close_timeout=timeout,
             retry_policy=_RETRY,
         )
-        if payload["service_level"] != "autonomous":
-            await workflow.wait_condition(lambda: self.approved)
         delivered = await workflow.execute_activity(
             deliver_activity,
             payload,
@@ -60,7 +59,11 @@ class TenderJob:
             retry_policy=_RETRY,
         )
         chunks = extracted["chunks"] if "chunks" in extracted else []
-        return {
+        if payload["service_level"] == "autonomous":
+            status = "waiting_for_buyer"
+        else:
+            status = "waiting_for_expert"
+        self._snapshot = {
             "requirements": extracted["requirements"],
             "matrix": matrix["rows"],
             "paragraphs": drafted["paragraphs"],
@@ -68,9 +71,19 @@ class TenderJob:
             "chunks": chunks,
             "deliverables": delivered,
             "workflow_id": workflow.info().workflow_id,
-            "status": "waiting_for_buyer",
+            "status": status,
         }
+        # Deliverables exist before the human gate so a reviewer can read them.
+        # The CLI does not send approve. The buyer journey does.
+        if payload["service_level"] != "autonomous":
+            await workflow.wait_condition(lambda: self.approved)
+            self._snapshot["status"] = "waiting_for_buyer"
+        return self._snapshot
 
     @workflow.signal
     def approve(self) -> None:
         self.approved = True
+
+    @workflow.query
+    def snapshot(self) -> dict[str, Any]:
+        return self._snapshot

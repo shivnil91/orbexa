@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadGoldenCase, rubricForCases } from "./golden.ts";
 
 const goldenPath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -122,10 +123,11 @@ export function scoreLessons(
     throw new Error("golden suite has no cases");
   }
   const passed = cases.filter((item) => {
-    if (item.expect === "missing_evidence") {
+    const expectation = loadGoldenCase(item).expectation;
+    if (expectation === "missing_evidence") {
       return behavior.missingCertificate === "missing_evidence";
     }
-    if (item.expect === "cite_width") {
+    if (expectation === "cite_width") {
       return behavior.citesWidth;
     }
     return behavior.keepsStageOrder;
@@ -280,6 +282,8 @@ export async function stageLearnedVersion(
   const publishedLessons = await publishedLessonBodies(db, job.agent_id);
   const baselineScore = scoreLessons(expertise, publishedLessons, golden.cases);
   const score = scoreLessons(expertise, [...publishedLessons, lesson.proposed_text], golden.cases);
+  const { judgeLessons } = await import("./judge.ts");
+  const judged = judgeLessons(expertise, [...publishedLessons, lesson.proposed_text], golden.cases);
   const improved = Number(score) > Number(baselineScore);
   if (input.embeddingModelId && input.embeddingModelId !== published.embedding_model_id) {
     await db.query("SELECT app.reembed_fixture($1, $2)", [
@@ -317,9 +321,19 @@ export async function stageLearnedVersion(
     throw new Error("draft version was not created");
   }
   await db.query(
-    `INSERT INTO eval_runs (agent_version_id, suite_id, suite_version_id, passed, score)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [versionId, suite.suiteId, suite.suiteVersionId, improved, score],
+    `INSERT INTO eval_runs (
+       agent_version_id, suite_id, suite_version_id, passed, score, judge_score, judge_passed, judge_rubric
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+    [
+      versionId,
+      suite.suiteId,
+      suite.suiteVersionId,
+      improved && judged.passed,
+      score,
+      judged.score,
+      judged.passed,
+      JSON.stringify(judged.rubric),
+    ],
   );
   await db.query(
     `INSERT INTO version_approvals (
@@ -463,9 +477,9 @@ async function ensureGoldenSuite(
   let suiteVersionId = versions.rows[0]?.id;
   if (!suiteVersionId) {
     const inserted = await db.query<{ id: string }>(
-      `INSERT INTO eval_suite_versions (suite_id, version, fixture_kind)
-       VALUES ($1, $2, $3) RETURNING id::text`,
-      [suiteId, golden.version, golden.fixtureKind],
+      `INSERT INTO eval_suite_versions (suite_id, version, fixture_kind, rubric)
+       VALUES ($1, $2, $3, $4::jsonb) RETURNING id::text`,
+      [suiteId, golden.version, golden.fixtureKind, JSON.stringify(rubricForCases(golden.cases))],
     );
     suiteVersionId = inserted.rows[0]?.id;
   }
@@ -506,10 +520,21 @@ async function recordBaseline(
   const expertise = await expertiseBodies(db, job.agent_id);
   const lessons = await publishedLessonBodies(db, job.agent_id);
   const score = scoreLessons(expertise, lessons, golden.cases);
+  const { judgeLessons } = await import("./judge.ts");
+  const judged = judgeLessons(expertise, lessons, golden.cases);
   await db.query(
-    `INSERT INTO eval_runs (agent_version_id, suite_id, suite_version_id, passed, score)
-     VALUES ($1, $2, $3, true, $4)`,
-    [published.id, suite.suiteId, suite.suiteVersionId, score],
+    `INSERT INTO eval_runs (
+       agent_version_id, suite_id, suite_version_id, passed, score, judge_score, judge_passed, judge_rubric
+     ) VALUES ($1, $2, $3, true, $4, $5, $6, $7::jsonb)`,
+    [
+      published.id,
+      suite.suiteId,
+      suite.suiteVersionId,
+      score,
+      judged.score,
+      judged.passed,
+      JSON.stringify(judged.rubric),
+    ],
   );
 }
 

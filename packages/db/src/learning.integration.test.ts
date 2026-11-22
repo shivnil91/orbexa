@@ -297,6 +297,16 @@ test("the post-job loop records metrics, keeps feedback comments out, and blocks
     () => publishLearnedVersion(db, staged.versionId, regression.id, creatorUser),
     /eval|promotion/i,
   );
+  await db.query(
+    `UPDATE eval_runs
+     SET passed = true, score = 0.9000, judge_passed = false
+     WHERE agent_version_id = $1`,
+    [staged.versionId],
+  );
+  await assert.rejects(
+    () => publishLearnedVersion(db, staged.versionId, regression.id, creatorUser),
+    /eval|promotion|judge/i,
+  );
   await rejectLesson(db, regression.id, "eval_regression");
   const rejected = await db.query<{ status: string; rejection_reason: string }>(
     "SELECT status, rejection_reason FROM lesson_candidates WHERE id = $1",
