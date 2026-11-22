@@ -55,6 +55,8 @@ The API is one deployable with modules inside it (identity, catalogue, orders, j
 
 ## 4. Initial AWS cost estimate
 
+The dev cell that fits account `486726633485` is specified later, in [ADR 0008](adr/0008-dev-environment.md) and [the dev runbook](dev-deploy-runbook.md). The tables below are the earlier sketch for a NAT gateway, a load balancer, and three tasks in `us-east-1`. They are not the bill for the Sydney dev stack.
+
 **This is an estimate, not a quote and not a bill.** Prices were read on 2026-11-22 from public AWS pages and from Vantage's republication of RDS on-demand rates. Nothing was priced from an AWS account, because none is connected. The arithmetic uses 730 hours in a month. The region in the Terraform files is `us-east-1` so validation has a region. Sydney and Frankfurt list prices differ. Re-run the AWS Pricing Calculator before any spend approval.
 
 ### Rates used

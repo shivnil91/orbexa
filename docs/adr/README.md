@@ -9,5 +9,6 @@
 | [0005](0005-residency-privacy-i18n.md) | Regional cells, privacy hooks, locale and time zone |
 | [0006](0006-deployment.md) | ECS Fargate cell, Cognito for identity, Postgres for authorization |
 | [0007](0007-service-levels.md) | Autonomous, Expert Verified, Expert Led |
+| [0008](0008-dev-environment.md) | Sydney dev cell without NAT, sized for the US$100 credit |
 
 These records are proposed. The founder accepts them by the actions in [first-response.md](../first-response.md).

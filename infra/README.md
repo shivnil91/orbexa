@@ -1,11 +1,17 @@
-# Infrastructure skeleton
+# Infrastructure
 
-This is a Terraform sketch of one regional cell. It is not applied. The environments pin `us-east-1` only so `terraform validate` has a provider region; the founder still chooses the first live region.
+Two shapes live here. Only the dev shape is meant to be applied, and only by the founder, in account `486726633485`.
 
-`desired_count` is 0. The container image is `orbexa/placeholder:not-built`. Applying this would create billable network, database, and load-balancer resources even with no running tasks. Do not apply it until the founder approves the spend and an AWS account exists.
+## Dev
 
-Postgres on RDS can `CREATE EXTENSION vector`. That statement is in the SQL migrations, not in Terraform.
+`infra/bootstrap` creates the Terraform state bucket and the DynamoDB lock table. Its own state file stays on the founder's machine.
 
-Identity is Amazon Cognito. Authorization stays in Postgres `org_memberships`. Cognito groups are not the permission model.
+`infra/envs/dev` is one Fargate task, RDS PostgreSQL 16 on `db.t4g.micro` with room for pgvector, S3, SQS, Cognito, three secret shells, and budgets at US$20 and US$50. There is no NAT gateway and no load balancer. The steps, the IAM policy, and the cost table are in [docs/dev-deploy-runbook.md](../docs/dev-deploy-runbook.md). [ADR 0008](../docs/adr/0008-dev-environment.md) records why.
 
-The worker task role can read only `orbexa/<env>/worker/runtime`. It cannot read the API secret. No role has `AdministratorAccess`.
+`task_desired_count` is 0. The container images are placeholders. Applying the stack still creates the database.
+
+## Staging and prod
+
+`infra/modules/cell` is the larger skeleton: NAT, a load balancer, WAF, and three services at `desired_count` 0. `infra/envs/staging` and `infra/envs/prod` call it. Both roots refuse account `486726633485`. Do not apply them.
+
+The worker role in that module can read only `orbexa/<env>/worker/runtime`. The dev stack is one task, so the split there is which container receives which secret. The dev task role itself cannot call `GetSecretValue`.

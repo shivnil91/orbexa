@@ -1,0 +1,243 @@
+# Dev deploy runbook
+
+Account `486726633485`, region `ap-southeast-2` (Asia Pacific (Sydney)). This is the only stack to apply. It has not been applied. No AWS API was called to write it. Do not apply `infra/envs/staging` or `infra/envs/prod`. Do not put a live Stripe key, a model key, or an AWS access key in git.
+
+The shape is [ADR 0008](adr/0008-dev-environment.md). CI runs `terraform validate` with `-backend=false` and does not call AWS.
+
+## What you are creating
+
+- A state bucket `orbexa-dev-tfstate-486726633485` and a lock table `orbexa-dev-tfstate-lock`.
+- One VPC (`10.40.0.0/16`), two public subnets, one internet gateway. No NAT gateway and no load balancer.
+- One ECS service `orbexa-dev` with `desired_count` 0. The task is 0.25 vCPU and 1 GB, ARM, and holds the API on port 43124, the worker, and the Temporal dev server on `127.0.0.1:7233`.
+- RDS PostgreSQL 16, `db.t4g.micro`, 20 GB gp3, single-AZ, encrypted, not publicly reachable. The master password is an RDS-managed secret. pgvector is created by `packages/db/migrations/0001_foundations.sql`, not by Terraform.
+- Document bucket `orbexa-dev-documents-486726633485`, private, versioned, SSE-S3.
+- Secret shells with no values: `orbexa/dev/worker/anthropic`, `orbexa/dev/worker/openai`, `orbexa/dev/api/stripe_test`.
+- Budgets `orbexa-dev-monthly-20` and `orbexa-dev-monthly-50`. They measure cost before credits are applied.
+
+## 1. Confirm the account
+
+1. Sign in to the AWS console as the root user or an IAM administrator of account `486726633485`.
+2. Open the account menu in the top right. The account ID must be `486726633485`. If it is not, sign out.
+3. Set the region menu to **Asia Pacific (Sydney) ap-southeast-2**. Leave it there for every step below.
+4. Open **Billing and Cost Management → Credits**. Confirm the Free plan credit and the expiry **2027-05-22**. If either differs, stop. Credits are not a spending cap. Do not add a payment method you are unwilling to be charged on once the credit is gone.
+
+## 2. Create the deployer policy and user
+
+IAM managed policies are capped at 6,144 characters, so the deployer permissions are three policies. Attach all three. Together they are limited to this account, this region, and the resource names in the dev stack. They deny NAT gateways, Elastic IPs, EC2 instances, load balancers, WAF, Organizations, billing, Cost Explorer, payments, tax, invoicing, customer KMS keys, IAM users, access keys, and customer managed policies other than these three and `AmazonECSTaskExecutionRolePolicy`. They also deny `secretsmanager:GetSecretValue` and `secretsmanager:PutSecretValue`. `budgets:ViewBudget` and `budgets:ModifyBudget` are allowed only on the two budgets above, because Terraform creates those alarms and cannot do it without them. They do not change the payment method.
+
+| File | IAM policy name |
+| --- | --- |
+| `infra/iam/orbexa-dev-deployer-platform.json` | `orbexa-dev-deployer-platform` |
+| `infra/iam/orbexa-dev-deployer-data.json` | `orbexa-dev-deployer-data` |
+| `infra/iam/orbexa-dev-deployer-identity.json` | `orbexa-dev-deployer-identity` |
+
+1. Open **IAM → Policies → Create policy**.
+2. Choose **JSON**. Replace the stub with the full contents of `infra/iam/orbexa-dev-deployer-platform.json`.
+3. Choose **Next**. Policy name: `orbexa-dev-deployer-platform`. Description: `Orbexa dev deployer, network and ECS, ap-southeast-2.`
+4. Choose **Create policy**.
+5. Repeat for `orbexa-dev-deployer-data.json` with policy name `orbexa-dev-deployer-data`, and for `orbexa-dev-deployer-identity.json` with policy name `orbexa-dev-deployer-identity`. The policy name must match the file name without `.json`. A mismatch makes the later GitHub role attachment fail.
+6. Open **IAM → Users → Create user**.
+7. User name: `orbexa-dev-deployer`.
+8. Leave **Provide user access to the AWS Management Console** unticked. This user has no console password. Choose **Next**.
+9. Choose **Attach policies directly**. Search for `orbexa-dev-deployer`. Tick all three policies from the table. Do not tick AdministratorAccess, PowerUserAccess, IAMFullAccess, or Billing. Choose **Next**, then **Create user**.
+10. Open the user, then the **Security credentials** tab. Under **Access keys**, choose **Create access key**.
+11. Use case: **Command Line Interface**. Tick the confirmation. Choose **Next**, then **Create access key**.
+12. Copy the access key ID and the secret access key into a password manager. Close the dialog. AWS shows the secret once.
+13. Do not download the CSV into the git checkout. Do not commit it. Do not paste it into chat, GitHub, Slack, or a `.tf` file.
+
+## 3. Point the CLI at that user
+
+Install AWS CLI v2 and Terraform 1.9.x. CI pins Terraform 1.9.8.
+
+```bash
+aws configure --profile orbexa-dev
+```
+
+Region: `ap-southeast-2`. Output: `json`. Use the access key from the password manager.
+
+```bash
+export AWS_PROFILE=orbexa-dev
+aws sts get-caller-identity
+```
+
+Stop unless `Account` is `486726633485` and the ARN contains `user/orbexa-dev-deployer`.
+
+## 4. Bootstrap remote state
+
+From a checkout of this repository:
+
+```bash
+cd infra/bootstrap
+terraform init
+terraform plan -out=tfplan
+```
+
+The plan creates the state bucket and the lock table. It does not create a database, a NAT gateway, or a task. Then:
+
+```bash
+terraform apply tfplan
+```
+
+`infra/bootstrap/terraform.tfstate` is gitignored. Copy it to the password manager. If it is lost, the bucket and table can be imported:
+
+```bash
+terraform import aws_s3_bucket.state orbexa-dev-tfstate-486726633485
+terraform import aws_dynamodb_table.lock orbexa-dev-tfstate-lock
+```
+
+Do not commit the state file. It contains no application secrets. It does contain resource IDs.
+
+## 5. Plan and apply the dev stack
+
+Find the laptop's public address at `https://checkip.amazonaws.com` and write it as a `/32`.
+
+```bash
+cd infra/envs/dev
+cp dev.tfvars.example dev.tfvars
+```
+
+Edit `dev.tfvars`:
+
+- `budget_email` is a real inbox. `@example.com` is rejected.
+- `api_ingress_cidrs` is that `/32`. `0.0.0.0/0` is rejected.
+- `task_desired_count` stays `0`.
+- `github_repository` stays empty until the optional OIDC step below.
+
+`dev.tfvars` is gitignored.
+
+```bash
+terraform init
+terraform plan -var-file=dev.tfvars -out=tfplan
+```
+
+`terraform init` configures the S3 backend from `backend.tf`. If it says the bucket does not exist, the bootstrap apply did not finish.
+
+Read the plan. Apply only if all of these are true:
+
+- `aws_db_instance.postgres` is `db.t4g.micro`, `multi_az` false, `publicly_accessible` false.
+- There is no `aws_nat_gateway`, no `aws_eip`, and no `aws_lb`.
+- `aws_ecs_service.app` has `desired_count` 0.
+- The three `aws_secretsmanager_secret` resources have no `aws_secretsmanager_secret_version`.
+- The budgets are `orbexa-dev-monthly-20` and `orbexa-dev-monthly-50`.
+
+```bash
+terraform apply tfplan
+```
+
+RDS takes several minutes. No container starts. The placeholder image is not pulled.
+
+## 6. Confirm the budget mail and store the three secrets
+
+AWS sends a confirmation mail for each budget notification. Open them and confirm, or the alarms never send. There are two budgets and each has an actual notification and a forecast notification, so several messages can arrive. Confirm each one.
+
+Store secret values while signed in to the console as the administrator. The deployer key is denied `PutSecretValue`, and putting a key on the deployer CLI would also leave it in shell history.
+
+1. Open **Secrets Manager** in Sydney.
+2. Open `orbexa/dev/worker/anthropic`. Choose **Set secret value**. Type **Plaintext**. Paste the Anthropic key. Save.
+3. Repeat for `orbexa/dev/worker/openai`.
+4. Repeat for `orbexa/dev/api/stripe_test`. The value must start with `sk_test_`. If it starts with `sk_live_` or `rk_live_`, delete it. The connected ThirdRoc account is a live account and must not be used.
+5. Do not copy the RDS-managed secret into a file, a chat, or the task definition. ECS reads it when a task starts.
+
+Terraform does not store these values and will not overwrite them on a later apply unless the secret resource itself is replaced. `secretsmanager:UpdateSecret` remains allowed because that is the API Terraform uses for secret metadata. Do not use the deployer key to call it with a secret string.
+
+## 7. Start the task only after images exist
+
+This repository does not build the images. When they exist:
+
+1. Build `linux/arm64` and push the API and the worker to the URL from `terraform output ecr_repository_url`. Tags are your choice. Put the full URIs in `api_image` and `worker_image`.
+2. The API image serves `GET /health` on port 43124 and can run the health check, which is `node` fetching that URL. It reads `PORT`, `ORBEXA_ENV`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`, `TEMPORAL_ADDRESS`, `DOCUMENT_BUCKET`, `WORK_QUEUE_URL`, and `STRIPE_SECRET_KEY`. `STRIPE_SECRET_KEY` is injected from `orbexa/dev/api/stripe_test`. Assemble `DATABASE_URL` in the entrypoint with the password URL-encoded, and use `sslmode=require`.
+3. The worker image runs `python -m orbexa_ai.serve 127.0.0.1:7233 orbexa-dev`. It receives `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`. It does not receive the Stripe secret.
+4. The Temporal container is `temporalio/temporal:1.10.1`, command `server start-dev --ip 127.0.0.1 --db-filename /tmp/temporal.db`. It is pulled from Docker Hub on task start. A Docker Hub limit, or a missing arm64 manifest, shows up as a pull failure. The fallback is to copy that image into the ECR repository and set `temporal_image`.
+5. Set `task_desired_count` to `1`.
+6. Plan again. The plan should change the task definition and the desired count. It should not replace the database. Apply.
+
+The API is then `http://<task public IPv4>:43124`. The address changes when the task is replaced. There is no TLS and no load balancer. The security group allows that port only from `api_ingress_cidrs`. Do not send customer documents or a live payment through it.
+
+Run SQL migrations from a one-off task in the same subnets and security group (`terraform output public_subnet_ids` and `terraform output task_security_group_id`). Do not open port 5432 to the internet so a laptop can reach RDS. The first migration runs `CREATE EXTENSION vector` as the master user. `rds.force_ssl` is 1.
+
+To find the running address:
+
+```bash
+aws ecs list-tasks --region ap-southeast-2 --cluster orbexa-dev
+aws ecs describe-tasks --region ap-southeast-2 --cluster orbexa-dev --tasks <task-arn>
+```
+
+The public address is on the elastic network interface in that description.
+
+## 8. GitHub Actions OIDC, later
+
+Leave this off until the repository has a GitHub owner. Pull-request jobs must not assume a cloud role.
+
+1. In `dev.tfvars`, set `github_repository` to `OWNER/orbexa` with no wildcard.
+2. Plan and apply. Terraform creates the OIDC provider and the role `orbexa-dev-github-deploy`.
+3. The trust allows only `repo:OWNER/orbexa:environment:dev`. It does not allow `pull_request`. Terraform attaches the same three managed policies, including the denies. Those policies must already exist from step 2.
+4. In GitHub, create an environment named `dev` and require a reviewer. A workflow that assumes the role must set `environment: dev` and must not run from a pull request.
+5. The role ARN is `terraform output github_deploy_role_arn`.
+6. After that works, disable the access key on `orbexa-dev-deployer`. A long-lived key is the worse of the two credentials.
+
+`infra/iam/orbexa-dev-github-oidc-trust.json` is the same trust with `REPLACE_WITH_GITHUB_OWNER` left for a reader. Terraform substitutes the owner from `github_repository`. Do not attach that file to a role by hand unless the placeholder has been replaced.
+
+## 9. Stop spend
+
+Scale the task to zero when nobody is using it. Fargate and the public IPv4 stop. The database does not.
+
+```bash
+# dev.tfvars: task_desired_count = 0
+terraform plan -var-file=dev.tfvars -out=tfplan
+terraform apply tfplan
+```
+
+Stop the database to drop the instance charge. Storage and secrets continue. AWS starts a stopped instance again after seven days, so this is a week at a time, not a way to leave it off until May.
+
+```bash
+aws rds stop-db-instance --region ap-southeast-2 --db-instance-identifier orbexa-dev
+```
+
+Start it again with `aws rds start-db-instance` and the same identifier. A Terraform apply that modifies the instance can also start it. Read the plan.
+
+The database has deletion protection. To destroy the dev stack, set deletion protection to false in `infra/modules/dev-stack/main.tf`, apply, then destroy. The state bucket and lock table refuse `terraform destroy` until `prevent_destroy` is removed. Empty the bucket first.
+
+## 10. Monthly cost
+
+US dollars, list price, 730-hour month, before tax. This is an estimate, not a quote. Re-check the AWS Pricing Calculator for `ap-southeast-2` before relying on it. Model invoices and Stripe fees are not on this bill and are not paid by these credits.
+
+| Line | Rate and assumption | USD / month |
+| --- | --- | --- |
+| RDS `db.t4g.micro`, single-AZ, always on | US$0.025 per hour. Usage AI price list of 2026-11-19 and cloud-credits.org of 2026-10-19, both for PostgreSQL in `ap-southeast-2`. 0.025 × 730 = 18.25 | 18.25 |
+| gp3, 20 GB provisioned | US$0.138 per GB-month, the Singapore and Tokyo single-AZ rate on the Clowdey RDS gp3 page checked 2026-11-03. Sydney's code is `APS2-RDS:GP3-Storage`; that page did not print the Sydney dollar rate, so this row uses the Singapore/Tokyo rate. 20 × 0.138 = 2.76. Baseline 3,000 IOPS and 125 MiB/s are included. Backups up to the allocated size are included. Autoscaling is capped at 30 GB | 2.76 |
+| Fargate Linux ARM, 0.25 vCPU, 730 hours | US$0.03885 per vCPU-hour in Sydney. Usage AI Fargate page and vmprices, the latter checked 2026-11-22. 0.25 × 0.03885 × 730 = 7.09 | 7.09 |
+| Fargate Linux ARM, 1 GB, 730 hours | US$0.00426 per GB-hour in Sydney, same sources. 0.00426 × 730 = 3.11 | 3.11 |
+| One in-use public IPv4, 730 hours | US$0.005 per hour in every commercial region, Amazon VPC pricing. Charged only while the task is running | 3.65 |
+| Secrets Manager, four secrets | US$0.40 per secret-month, Secrets Manager pricing. Three application shells plus the RDS-managed password. API calls at US$0.05 per 10,000 are under one cent at task-start volume | 1.60 |
+| S3 Standard, 5 GB | US$0.025 per GB-month in Sydney. Toolweight's reading of the S3 pricing page, and the Clowdey regional map of 2026-11-03 (Sydney storage about 9% above the US$0.023 US East rate). Documents plus state | 0.13 |
+| CloudWatch Logs, 1 GB ingested | US$0.70 per GB, the Singapore rate on the Clowdey ingestion page checked 2026-11-13. Sydney's code is `APS2-DataProcessing-Bytes`; that page did not print the Sydney dollar rate. Retention is 7 days. If an account-level 5 GB allowance applies, this row is zero | 0.70 |
+| ECR, 1 GB | US$0.10 per GB-month from the ECR pricing example. A Sydney uplift was not extracted; treat the row as under US$0.20 | 0.10 |
+| Data transfer out, 2 GB | US$0.114 per GB. Toolweight's Sydney column, consistent with the Clowdey map (Sydney egress about 27% above US$0.09). An account-level 100 GB allowance would make this zero | 0.23 |
+| SQS, DynamoDB lock, Cognito, budgets | SQS stays inside the 1 million request allowance. The lock table is on-demand and under US$0.05. Cognito Essentials is US$0 under 10,000 monthly active users, as recorded from the Cognito pricing page on 2026-11-22 in `docs/first-response.md`. The first two AWS Budgets are US$0; a further budget is US$0.02 per day | 0.00 |
+| **Task running all month** | | **37.62** |
+
+Rows that are not in that total:
+
+| Choice that was not taken | Why it lost | USD / month |
+| --- | --- | --- |
+| One NAT gateway, no data | US$0.059 per hour in Sydney. AWS Network Firewall pricing example for Asia Pacific (Sydney); cloud-credits.org of 2026-10-19; DevOpsPlant, October 2026. 0.059 × 730 = 43.07, before the US$0.059 per GB processed | 43.07 |
+| Application load balancer, plus its own public IPv4 | US$0.0252 per hour and US$0.008 per LCU-hour. cloud-credits.org of 2026-10-19 and CloudCostDB. 0.0252 × 730 = 18.40, plus US$3.65 for the address, before LCUs | 22.05 |
+| Aurora Serverless v2 at a 0.5 ACU floor | US$0.12 per ACU-hour in US East and US$0.20 in Singapore, Clowdey ServerlessV2Usage page checked 2026-11-03. Sydney's code is `APS2-Aurora:ServerlessV2Usage`. 0.5 × 730 × 0.12 = 43.80 at the cheaper published rate, before storage and I/O. An open connection from the API stops scale-to-zero | 43.80 |
+| Customer-managed KMS key | US$1 per key-month on the KMS pricing example. SSE-S3 and the AWS-managed RDS key are used instead | 1.00 |
+| Temporal Cloud | No monthly minimum on the pay-as-you-go plan published 2026-09-14: US$50 per million actions plus 10% support (temporal.io/pricing). Left for later. The dev server shares the task and adds no AWS line | 0.00 |
+
+Planning figures, same assumptions:
+
+| Way of running it | USD / month before tax | What US$100 covers |
+| --- | --- | --- |
+| Task off, database on | 22.84 | about 4.4 months |
+| Task 10 hours × 22 weekdays (220 hours), database on | 27.33 | about 3.7 months |
+| Task and database on all month | 37.62 | about 2.7 months, into February 2027 |
+
+The 220-hour row uses the same unit rates: Fargate US$2.14 + US$0.94, public IPv4 US$1.10, logs 0.3 GB at the Singapore stand-in (US$0.21), and 1 GB egress (US$0.11), on top of the US$22.84 fixed rows.
+
+US$100 spread to 2027-05-22 is about US$16.67 a month. An always-on database is already US$18.25, so the credit does not last until expiry unless the database is stopped for a large part of each month. The seven-day auto-start limit means that takes a weekly action. The US$20 alarm is the signal to stop the database or scale the task to zero.
+
+If Australian GST of 10% applies to the account, the always-on total is about US$41. The task should not stay at 1 in that case. Raising memory from 1 GB to 2 GB adds US$3.11 all month (US$40.73 before tax). Switching the task to x86 adds about US$2.55 all month (US$40.17 before tax). Stay on ARM and 1 GB unless a container is killed for memory, and then scale it to zero overnight.
+
+Nothing here was read from the account. The two rows marked as stand-ins are gp3 storage and CloudWatch ingestion. Confirm `APS2-RDS:GP3-Storage` and `APS2-DataProcessing-Bytes` in the pricing calculator before treating US$37.62 as closer than a planning figure.

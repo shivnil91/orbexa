@@ -4,11 +4,11 @@
 
 | | Local | Dev | Staging | Prod |
 | --- | --- | --- | --- | --- |
-| Data | Compose Postgres on port 54329, password `orbexa_local_only` | RDS single-AZ | RDS single-AZ | RDS Multi-AZ |
-| Workflow | Temporal `server start-dev` on 7233, UI 8233 | Temporal Cloud namespace, or still local until the contract exists | Temporal Cloud | Temporal Cloud |
+| Data | Compose Postgres on port 54329, password `orbexa_local_only` | RDS `db.t4g.micro` single-AZ, private address, in `ap-southeast-2` | RDS single-AZ | RDS Multi-AZ |
+| Workflow | Temporal `server start-dev` on 7233, UI 8233 | Temporal dev server in the one Fargate task. Temporal Cloud later | Temporal Cloud | Temporal Cloud |
 | Stripe | Not called | Sandbox only, after the founder creates one | Sandbox | Live, after a separate approval |
 | Customer files | Fixtures | Fixtures | Fixtures | Only after the founder allows real data |
-| Terraform | Not used | `infra/envs/dev` | `infra/envs/staging` | `infra/envs/prod` |
+| Terraform | Not used | `infra/bootstrap`, then `infra/envs/dev`. See [the dev runbook](dev-deploy-runbook.md) | `infra/envs/staging` | `infra/envs/prod` |
 
 The compose file was not started here. Docker was not installed. The Temporal image tag is `temporalio/temporal:1.10.1` and the command is `server start-dev`. That command was not executed.
 
@@ -43,7 +43,9 @@ Until there is an on-call rota, the founder is the contact. First moves: set wor
 
 ## Agents and production
 
-Coding agents do not receive production credentials. The worker does not receive the Stripe secret or the API secret. Terraform in this repo has `desired_count = 0` so a mistaken apply does not start the placeholder image. It would still create billable network and database objects. Do not apply it.
+Coding agents do not receive AWS credentials and do not apply Terraform. The dev task's worker container does not receive the Stripe test secret. The API container does not receive the model keys. `task_desired_count` defaults to 0 so a mistaken apply does not start the placeholder image. The database, storage, and secrets are still billable once the founder applies `infra/envs/dev`. Staging and prod are a different shape, with a NAT gateway and a load balancer, and their roots refuse account `486726633485`.
+
+The itemised dev estimate is in [the dev runbook](dev-deploy-runbook.md). The figures in `docs/first-response.md` section 4 are the earlier three-environment sketch.
 
 ## Cost
 

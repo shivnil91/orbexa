@@ -49,7 +49,7 @@ The API listens on port 43124 and answers `GET /health`. `POST /v1/demo/hospital
 
 ## Terraform
 
-`infra/` is a skeleton. `terraform validate` has been run. `terraform apply` has not, and should not, until the founder approves the spend.
+`infra/envs/dev` is the Sydney dev stack for account `486726633485`. The founder applies it by following [docs/dev-deploy-runbook.md](docs/dev-deploy-runbook.md). `infra/envs/staging` and `infra/envs/prod` are the larger cell and refuse that account. Nothing in this repository has been applied.
 
 ## Status
 

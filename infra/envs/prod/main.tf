@@ -1,3 +1,6 @@
+# Do not apply this root in account 486726633485. account_guard.tf rejects that
+# account. This skeleton still creates NAT gateways and a load balancer.
+
 terraform {
   required_version = ">= 1.9.0"
 
