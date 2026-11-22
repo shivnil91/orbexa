@@ -6,7 +6,7 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/health.test.ts src/routes.test.ts src/payments.test.ts src/webhook-dedup.test.ts src/slice.e2e.test.ts",
+    "test": "node --experimental-strip-types --test src/health.test.ts src/routes.test.ts src/payments.test.ts src/webhook-dedup.test.ts src/slice.e2e.test.ts src/m4.test.ts src/verticals/intake.test.ts",
     "start": "node --experimental-strip-types src/server.ts"
   },
   "dependencies": {

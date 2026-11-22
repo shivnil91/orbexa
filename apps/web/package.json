@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
-    "test": "node --experimental-strip-types --test src/lib/format.test.ts src/lib/locale.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/format.test.ts src/lib/locale.test.ts src/lib/dashboard.test.ts"
   },
   "dependencies": {
     "next": "16.4.6",

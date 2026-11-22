@@ -19,6 +19,7 @@ from temporalio import activity
 from orbexa_ai.deliverables import render_docx, render_xlsx
 from orbexa_ai.gateway import gateway_from_env
 from orbexa_ai.ingest import Chunk, chunk_document, scan_upload
+from orbexa_ai.injection import finalize_draft
 from orbexa_ai.job import MEDIA
 
 
@@ -127,7 +128,8 @@ async def draft_activity(payload: dict[str, str]) -> dict[str, Any]:
     if cached is not None:
         return cached
     chunks = ensure_ingest(payload)
-    return _write(store, "draft", gateway_from_env().complete("draft", chunks))
+    draft = finalize_draft(gateway_from_env().complete("draft", chunks), payload.get("tenant_id"))
+    return _write(store, "draft", draft)
 
 
 @activity.defn

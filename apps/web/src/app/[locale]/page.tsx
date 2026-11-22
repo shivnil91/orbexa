@@ -11,12 +11,14 @@ export default async function LocaleHome({ params }: { params: Promise<{ locale:
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-5 py-12 sm:px-8">
       <header className="flex flex-col gap-3">
-        <p className="text-sm font-medium tracking-wide text-zinc-500">Tender writing · Milestone 1</p>
+        <p className="text-sm font-medium tracking-wide text-zinc-500">Tender writing</p>
         <h1 className="text-3xl font-semibold tracking-tight">Orbexa foundation</h1>
         <p className="text-lg leading-8 text-zinc-600 dark:text-zinc-300">
           This screen is the engineering scaffold. Buyers and experts do not register here yet.
-          The local hospital-bed slice is Rahul buying Moishin&apos;s agent. It runs in tests and at
-          POST /v1/demo/hospital-beds on the API. It uses a fixture model and a fake payment adapter.
+          A specialist category is a vertical pack: intake form, deliverable types, rubric, and
+          workflow. The local hospital-bed slice is the first pack, Rahul buying Moishin&apos;s agent.
+          It runs in tests and at POST /v1/demo/hospital-beds on the API. It uses a fixture model
+          and a fake payment adapter.
         </p>
       </header>
       <section className="grid gap-4 sm:grid-cols-3">
@@ -42,6 +44,11 @@ export default async function LocaleHome({ params }: { params: Promise<{ locale:
           </p>
         </article>
       </section>
+      <p className="text-sm">
+        <a className="underline" href={`/${locale}/dashboard`}>
+          Agent version dashboard
+        </a>
+      </p>
       <section className="rounded-lg bg-zinc-50 p-4 text-sm leading-6 dark:bg-zinc-900">
         <h2 className="font-medium">Sample formatting, not a price</h2>
         <p className="mt-2">USD in en-US: {formatMoney(BigInt(1050), "USD", "en-US")}</p>

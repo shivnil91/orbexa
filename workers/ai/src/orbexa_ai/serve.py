@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 
 from temporalio.client import Client
 from temporalio.worker import Worker
 
 from orbexa_ai.cli import ACTIVITIES
+from orbexa_ai.startup import refuse_live_stripe_keys
 from orbexa_ai.tender_workflow import TenderJob
 
 
@@ -25,6 +27,7 @@ async def serve(target: str, task_queue: str) -> None:
 
 
 def main() -> None:
+    refuse_live_stripe_keys(os.environ)
     if len(sys.argv) != 3:
         raise SystemExit("usage: python -m orbexa_ai.serve HOST:PORT TASK_QUEUE")
     asyncio.run(serve(sys.argv[1], sys.argv[2]))

@@ -1,6 +1,6 @@
 # Orbexa
 
-Orbexa is a marketplace where verified experts publish agents and buyers purchase a finished outcome. The first outcome is tender writing. Milestone 2 runs that transaction locally, with fake payments and a fixture model.
+Orbexa is a marketplace where verified experts publish agents and buyers purchase a finished outcome. The core is a vertical: intake, deliverables, rubric, and workflow are data on `vertical_revisions`. Tender writing is the first pack, not a hardcoded category. Milestone 2 runs that pack locally, with fake payments and a fixture model.
 
 The design notes are in `docs/`. Start with [docs/first-response.md](docs/first-response.md).
 
