@@ -34,6 +34,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install the worker venv the slice test shells out to
+        run: |
+          python -m venv workers/ai/.venv
+          workers/ai/.venv/bin/python -m pip install --upgrade "pip>=26.2"
+          workers/ai/.venv/bin/python -m pip install -e "./workers/ai"
       - run: pnpm test
       - run: pnpm --filter @orbexa/db test:pg16
       - run: pnpm audit --audit-level=high
