@@ -307,13 +307,13 @@ resource "aws_sqs_queue" "work" {
 
 resource "aws_secretsmanager_secret" "anthropic" {
   name                    = "orbexa/dev/worker/anthropic"
-  description             = "Dev worker ANTHROPIC_API_KEY. The secret value is set in the console, not in Terraform."
+  description             = "Dev ANTHROPIC_API_KEY for the API and the worker. The secret value is set in the console, not in Terraform."
   recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret" "openai" {
   name                    = "orbexa/dev/worker/openai"
-  description             = "Dev worker OPENAI_API_KEY. The secret value is set in the console, not in Terraform."
+  description             = "Dev OPENAI_API_KEY for the API and the worker. The secret value is set in the console, not in Terraform."
   recovery_window_in_days = 7
 }
 
@@ -579,6 +579,7 @@ resource "aws_ecs_task_definition" "app" {
       ]
       environment = concat(local.shared_environment, [
         { name = "PORT", value = "43124" },
+        { name = "ORBEXA_MODEL", value = "claude-sonnet-5-5" },
       ])
       secrets = [
         {
@@ -596,6 +597,14 @@ resource "aws_ecs_task_definition" "app" {
         {
           name      = "DEMO_BASIC_AUTH"
           valueFrom = aws_secretsmanager_secret.demo_auth.arn
+        },
+        {
+          name      = "ANTHROPIC_API_KEY"
+          valueFrom = aws_secretsmanager_secret.anthropic.arn
+        },
+        {
+          name      = "OPENAI_API_KEY"
+          valueFrom = aws_secretsmanager_secret.openai.arn
         },
       ]
       healthCheck = {

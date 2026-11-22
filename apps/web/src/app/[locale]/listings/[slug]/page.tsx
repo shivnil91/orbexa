@@ -39,6 +39,9 @@ export default async function ListingPage({ params }: { params: Promise<{ locale
         <p className="text-sm text-muted">{categoryLabel(item.category)}{item.example ? ` · ${t(locale, "card.example")}` : ""}</p>
         <h1 className="mt-2 text-4xl font-semibold tracking-tight">{item.name}</h1>
         <p className="mt-3 text-lg leading-8 text-muted">{item.pitch}</p>
+        {user && item.ownerId === user.id && item.status === "published" ? (
+          <p className="mt-4 rounded-xl border border-line bg-surface p-4 text-base leading-7">{t(locale, "listing.live", { price: formatMoney(BigInt(item.priceMinor), item.currency, locale) })}</p>
+        ) : null}
         <p className="mt-3 text-sm">{rating} · {runs}</p>
         <p className="mt-2 text-sm">{item.listing.expertStatus === "verified" ? t(locale, "listings.verified") : t(locale, "listings.unverified")}</p>
         <p className="text-sm">{t(locale, "listings.uncertified")}</p>

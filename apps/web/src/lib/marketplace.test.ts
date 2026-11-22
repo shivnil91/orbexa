@@ -12,6 +12,8 @@ import {
   browseCatalog,
   buildCatalog,
   recommend,
+  draftFromSkill,
+  listingSlugFromName,
   sandboxReply,
   saveAgent,
   scoreMatch,
@@ -46,12 +48,13 @@ test("browse filters category, price, and rating, then paginates", () => {
   assert.ok(cheap.items.every((item) => item.priceMinor <= 2000));
   assert.ok(cheap.items.some((item) => item.slug === "example-support-reply"));
   const high = browseCatalog(items, { minRating: 5 });
-  assert.ok(high.items.some((item) => item.slug === "example-interface-critique"));
+  assert.ok(high.items.some((item) => item.slug === "example-practice-plan"));
   assert.equal(high.items.some((item) => item.slug === "example-clause-drafter"), false);
+  const published = items.filter((item) => item.status === "published").length;
   const page = browseCatalog(items, { sort: "newest", page: 2 }, 6);
   assert.equal(page.page, 2);
-  assert.equal(page.pages, 2);
-  assert.equal(page.items.length, items.filter((item) => item.status === "published").length - 6);
+  assert.equal(page.pages, Math.ceil(published / 6));
+  assert.equal(page.items.length, Math.min(6, published - 6));
 });
 
 test("a draft stays out of the public catalog and a suspension hides an example", () => {
@@ -101,11 +104,37 @@ test("generated tiers balance and live runs replace example run counts", () => {
   assert.equal(first?.slug.length > 0, true);
 });
 
-test("the sandbox reply is labeled as a fixture and quotes the request", () => {
+test("the sandbox reply is a finished note and does not echo the instructions", () => {
   const paragraphs = sandboxReply({ name: "Load checker", instructions: "Flag missing load cases.", knowledge: "LC2", need: "Check bridge load case LC2" });
-  assert.match(paragraphs[0] ?? "", /Demo fixture/);
-  assert.match(paragraphs.join("\n"), /Check bridge load case LC2/);
-  assert.match(paragraphs.join("\n"), /Flag missing load cases/);
+  const text = paragraphs.join("\n");
+  assert.match(text, /LC2/);
+  assert.match(text, /No measurement was added/);
+  assert.equal(text.includes("Instructions used"), false);
+  assert.equal(text.includes("Flag missing load cases."), false);
+  const reply = sandboxReply({ name: "Support reply", instructions: "Restate the issue.", knowledge: "", need: "Draft a calm support reply about catering" }).join("\n");
+  assert.match(reply, /Thanks for writing about the catering order/);
+  assert.equal(reply.includes("Restate the issue."), false);
+});
+
+test("a skill becomes a priced draft a buyer can preview", () => {
+  const drawing = draftFromSkill("Checking engineering drawings for missing dimensions and clashes");
+  const books = draftFromSkill("Closing the books for small shops and flagging expenses that need a receipt");
+  const soccer = draftFromSkill("Writing youth soccer practice plans that parents can use at the park");
+  assert.equal(drawing?.category, "engineering");
+  assert.equal(drawing?.priceRaw, "45");
+  assert.equal(books?.category, "operations");
+  assert.equal(books?.priceRaw, "35");
+  assert.equal(soccer?.category, "writing");
+  assert.equal(soccer?.priceRaw, "20");
+  assert.equal(draftFromSkill("too short"), null);
+  const slug = listingSlugFromName("Load checker mobile-1795387568475 flags missing bridge load cases");
+  assert.match(slug, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+  assert.equal(slug.includes("--"), false);
+  for (const draft of [drawing, books, soccer]) {
+    if (!draft) throw new Error("draft missing");
+    const saved = validateAgent({ ...draft, knowledge: [] }, "publish");
+    assert.equal(saved.ok, true);
+  }
 });
 
 test("publish validation rejects a short instruction and accepts a complete agent", () => {

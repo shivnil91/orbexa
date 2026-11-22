@@ -4,12 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
 import { readDb } from "./demo-store.ts";
+import { draftDeliverable, modelConfigured } from "./model.ts";
 import { publishedListing, sandboxReply } from "./marketplace.ts";
 import { validateFeedback, type FeedbackInput, type FeedbackKind } from "@orbexa/db/feedback.ts";
 import { validateIntake } from "./intake.ts";
 import {
   checkoutPlan,
   sendStripeTestCheckout,
+  sendStripeTestRefund,
   stripeTestNetworkEnabled,
   stripeTestTransport,
   type CheckoutPlan,
@@ -72,6 +74,11 @@ export type JobRecord = {
   metricsWritten: boolean;
   processedStripeEvents: string[];
   refunded?: boolean;
+  modelDelivery?: boolean;
+  modelError?: "timeout" | "cap" | "provider" | "empty";
+  modelAttempts?: number;
+  inputTokens?: number;
+  outputTokens?: number;
   instructions?: string;
   sellerId?: string;
   createdAt?: number;
@@ -228,6 +235,23 @@ export async function payJob(
     if (!stripeTestNetworkEnabled(process.env)) {
       job.payment = plan;
       job.status = "queued";
+      job.startedAt = Date.now();
+      if (!job.transcript) {
+        if (modelConfigured()) {
+          job.status = "running";
+          job.modelDelivery = true;
+        } else {
+          job.cursor = job.stages.length;
+          job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
+          job.finishedAt = Date.now();
+          job.paragraphs = sandboxReply({
+            name: job.title,
+            instructions: job.instructions ?? "",
+            knowledge: "",
+            need: job.opportunityName,
+          });
+        }
+      }
       await writeJob(job);
       return job;
     }
@@ -346,6 +370,9 @@ export async function revealNext(id: string): Promise<JobRecord> {
       throw new Error("job not found");
     }
     if (job.refunded || job.status === "rejected" || job.status === "checkout" || !job.payment) {
+      return job;
+    }
+    if (job.modelDelivery) {
       return job;
     }
     if (job.status !== "queued" && job.status !== "running") {
@@ -531,6 +558,92 @@ async function writeMetrics(job: JobRecord): Promise<void> {
   lines.push(JSON.stringify({ kind: "draft", agentVersionId: job.agentVersionId, jobId: job.id }));
   await mkdir(rootDir(), { recursive: true });
   await writeFile(path.join(rootDir(), "invocations.jsonl"), `${lines.join("\n")}\n`, { flag: "a" });
+}
+
+export const MODEL_MAX_ATTEMPTS = 2;
+
+function failedUnreleasedDraft(job: JobRecord): boolean {
+  return Boolean(job.payment)
+    && !job.refunded
+    && job.status !== "checkout"
+    && job.status !== "accepted"
+    && job.paragraphs.length === 0
+    && job.modelError != null;
+}
+
+export async function deliverPaidDraft(id: string): Promise<JobRecord> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    if (job.transcript || job.refunded || job.status === "checkout" || !job.payment || !job.modelDelivery) {
+      return job;
+    }
+    if (job.paragraphs.length > 0) {
+      return job;
+    }
+    const attempts = job.modelAttempts ?? 0;
+    if (attempts >= MODEL_MAX_ATTEMPTS) {
+      job.modelError = job.modelError ?? "cap";
+      await writeJob(job);
+      return job;
+    }
+    job.modelAttempts = attempts + 1;
+    await writeJob(job);
+    const outcome = await draftDeliverable({
+      name: job.title,
+      instructions: job.instructions ?? "",
+      knowledge: "",
+      need: job.opportunityName,
+    });
+    if (!outcome.ok) {
+      job.modelError = outcome.error;
+      job.paragraphs = [];
+      await writeJob(job);
+      return job;
+    }
+    job.modelError = undefined;
+    job.paragraphs = outcome.paragraphs;
+    job.inputTokens = outcome.inputTokens;
+    job.outputTokens = outcome.outputTokens;
+    job.cursor = job.stages.length;
+    job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
+    job.finishedAt = Date.now();
+    await writeJob(job);
+    return job;
+  });
+}
+
+export async function refundUnreleasedJob(
+  id: string,
+  transport: StripeTransport = stripeTestTransport,
+): Promise<JobRecord | null> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job) {
+      return null;
+    }
+    if (job.refunded) {
+      return job;
+    }
+    if (!failedUnreleasedDraft(job)) {
+      return job;
+    }
+    const sessionId = job.payment?.id ?? "";
+    if (stripeTestNetworkEnabled(process.env) && sessionId.startsWith("cs_test_")) {
+      await sendStripeTestRefund({
+        orderId: job.id,
+        sessionId,
+        amountMinor: job.priceMinor,
+        currency: job.currency,
+      }, process.env, transport);
+    }
+    job.refunded = true;
+    job.status = "rejected";
+    await writeJob(job);
+    return job;
+  });
 }
 
 export async function listJobs(): Promise<JobRecord[]> {

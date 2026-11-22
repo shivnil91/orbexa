@@ -78,6 +78,11 @@ jobs:
       - run: pnpm --filter @orbexa/web exec playwright install --with-deps chromium
       - name: WCAG 2.2 AA and Core Web Vitals
         run: pnpm --filter @orbexa/web test:e2e
+      - name: Blind usability check when a model key is configured
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node scripts/blind-check.mjs
 
   images:
     runs-on: ubuntu-24.04

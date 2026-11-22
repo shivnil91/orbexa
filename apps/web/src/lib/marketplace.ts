@@ -94,12 +94,12 @@ const EXAMPLES: ExampleAgent[] = [
     category: "engineering",
     pitch: "Flag missing dimensions and clashes in an engineering drawing.",
     description: "Example agent. It lists gaps in a drawing set. It does not stamp drawings or replace an engineer.",
-    instructions: "List missing dimensions, units, and clashes. Never invent a measurement.",
+    instructions: "You check a description of a drawing. List each missing dimension, unit, or clash as its own bullet. Quote the buyer's words. Never invent a measurement. End with the questions a reviewer should ask before anyone builds from the sheet.",
     priceMinor: 4500,
     exampleRuns: 18,
     featured: true,
     createdAt: "2025-12-01T00:00:00.000Z",
-    output: { title: "Example output", body: "Example only. Sheet S-2 has no unit on the grid spacing. No measurement was added." },
+    output: { title: "Example output", body: "Missing from the brief\n\nThe grid spacing has no unit.\nThe clash at the stair is named, but no clearance is given.\n\nNo measurement was added. Ask for the unit and the clearance before anyone builds from this sheet." },
     reviews: [
       { rating: 5, body: "Example review. The gaps were listed without invented sizes.", createdAt: "2026-01-08T00:00:00.000Z" },
       { rating: 4, body: "Example review. Clear notes. Not a real project.", createdAt: "2026-02-12T00:00:00.000Z" },
@@ -107,62 +107,32 @@ const EXAMPLES: ExampleAgent[] = [
     agentVersionId: "11111111-1111-4111-8111-111111111111",
   },
   {
-    slug: "example-interface-critique",
-    name: "Interface critique",
-    category: "design",
-    pitch: "Review a screen for hierarchy, contrast, and empty states.",
-    description: "Example agent for product design feedback. It does not ship a redesign file.",
-    instructions: "Comment on hierarchy, contrast, labels, and the empty state. Do not invent brand metrics.",
-    priceMinor: 3500,
-    exampleRuns: 11,
-    featured: false,
-    createdAt: "2026-01-04T00:00:00.000Z",
-    output: { title: "Example output", body: "Example only. The primary action sits below the fold and the empty state has no next step." },
-    reviews: [{ rating: 5, body: "Example review. Useful as a sample critique.", createdAt: "2026-02-01T00:00:00.000Z" }],
-    agentVersionId: "11111111-1111-4111-8111-111111111112",
-  },
-  {
     slug: "example-clause-drafter",
     name: "Clause drafter",
     category: "legal",
     pitch: "Draft a plain-language clause from a short brief.",
     description: "Example agent. It drafts sample clause language. It is not a law firm and this is not legal advice.",
-    instructions: "Draft one plain-language clause. State assumptions. Do not claim the text is legal advice.",
+    instructions: "Draft one plain-language clause from the buyer's brief. State the assumptions in a short list. End with one sentence that a lawyer has not reviewed it. Do not claim this is legal advice.",
     priceMinor: 6000,
     exampleRuns: 9,
     featured: true,
     createdAt: "2026-01-20T00:00:00.000Z",
-    output: { title: "Example output", body: "Example only. A sample limitation clause, with a note that a lawyer has not reviewed it." },
+    output: { title: "Example output", body: "Limitation of liability\n\nThe supplier's liability for this work is limited to the fees paid for the job, except where the law does not allow a limit.\n\nAssumptions\n- One written brief.\n- This sentence does not cover personal injury.\n\nA lawyer has not reviewed this clause. This is not legal advice." },
     reviews: [{ rating: 4, body: "Example review. The draft is marked as a sample.", createdAt: "2026-03-01T00:00:00.000Z" }],
     agentVersionId: "11111111-1111-4111-8111-111111111113",
-  },
-  {
-    slug: "example-research-brief",
-    name: "Research brief",
-    category: "research",
-    pitch: "Turn a question into a short brief and leave the gaps open.",
-    description: "Example agent. It outlines a question, what would need a source, and what is unknown.",
-    instructions: "Write a short brief. Separate known points from gaps. Do not invent citations.",
-    priceMinor: 4000,
-    exampleRuns: 7,
-    featured: false,
-    createdAt: "2026-02-11T00:00:00.000Z",
-    output: { title: "Example output", body: "Example only. Three questions are listed as unanswered. No source was invented." },
-    reviews: [{ rating: 4, body: "Example review. Gaps stayed visible.", createdAt: "2026-03-04T00:00:00.000Z" }],
-    agentVersionId: "11111111-1111-4111-8111-111111111114",
   },
   {
     slug: "example-ops-checklist",
     name: "Ops checklist",
     category: "operations",
-    pitch: "Turn a recurring operations task into a checklist a teammate can run.",
+    pitch: "Turn a recurring operations task into a checklist a teammate can follow.",
     description: "Example agent for an internal checklist. It does not connect to a live operations tool.",
-    instructions: "Write a numbered checklist. Mark any step that needs a human to confirm.",
+    instructions: "Turn the buyer's recurring task into a numbered checklist a teammate can follow on the first day. Each step is one action. Mark any step that needs a person to confirm it. Do not invent software, logins, or measurements.",
     priceMinor: 2500,
     exampleRuns: 5,
     featured: false,
     createdAt: "2026-03-02T00:00:00.000Z",
-    output: { title: "Example output", body: "Example only. Step 1 is confirm the source system. No system was queried." },
+    output: { title: "Example output", body: "1. Confirm who owns the task today.\n2. Write each step in the order a new person would do it.\n3. Mark the step that needs a person to say it is done.\n4. Leave a note of where the source system is, without logging in.\n5. Hand the list to the teammate and ask them to read it back.\n\nNo system was queried." },
     reviews: [{ rating: 5, body: "Example review. The checklist is easy to follow.", createdAt: "2026-03-20T00:00:00.000Z" }],
     agentVersionId: "11111111-1111-4111-8111-111111111115",
   },
@@ -172,12 +142,12 @@ const EXAMPLES: ExampleAgent[] = [
     category: "support",
     pitch: "Draft a calm reply that restates the issue and the next step.",
     description: "Example agent for a support draft. It does not send the reply.",
-    instructions: "Restate the issue, the next step, and what you do not know yet.",
+    instructions: "Write a reply the buyer can send. Open by restating the customer's issue in their words. Give one clear next step. Say what you still need and do not guess an order number, a date, or a dollar amount. Keep it under 120 words.",
     priceMinor: 1500,
     exampleRuns: 14,
     featured: false,
     createdAt: "2026-03-18T00:00:00.000Z",
-    output: { title: "Example output", body: "Example only. The reply asks for the order number instead of guessing it." },
+    output: { title: "Example output", body: "Hi,\n\nThanks for writing about the catering order. I have your note, and I do not yet have the date or the headcount.\n\nNext step: reply with the event date and how many people, and I will confirm the deposit in the same thread.\n\nI will not guess an amount or an order number.\n\nBest," },
     reviews: [{ rating: 4, body: "Example review. Tone is calm and it does not invent an order.", createdAt: "2026-04-02T00:00:00.000Z" }],
     agentVersionId: "11111111-1111-4111-8111-111111111116",
   },
@@ -187,14 +157,179 @@ const EXAMPLES: ExampleAgent[] = [
     category: "writing",
     pitch: "Rewrite a vague request into scope, assumptions, and out-of-scope items.",
     description: "Example writing agent. It clarifies a request. It does not start the work.",
-    instructions: "List scope, assumptions, and out-of-scope items in plain language.",
+    instructions: "Rewrite the buyer's request as three short lists: what is in scope, what you are assuming, and what is out of scope. Use the buyer's words. Do not add a price or a timeline they did not mention.",
     priceMinor: 3000,
     exampleRuns: 4,
     featured: false,
     createdAt: "2026-04-09T00:00:00.000Z",
-    output: { title: "Example output", body: "Example only. Out of scope: visual design. Assumption: one reviewer." },
+    output: { title: "Example output", body: "In scope\nOne written note that turns the request into a job, a list of assumptions, and a list of what is not included.\n\nAssumptions\nOne reviewer. The request you pasted is the whole brief.\n\nOut of scope\nVisual design, and any price or timeline that was not in the request." },
     reviews: [{ rating: 5, body: "Example review. The out-of-scope list is the useful part.", createdAt: "2026-04-18T00:00:00.000Z" }],
     agentVersionId: "11111111-1111-4111-8111-111111111117",
+  },
+  {
+    slug: "example-monthly-close",
+    name: "Monthly close checklist",
+    category: "operations",
+    pitch: "Turn a month of shop expenses into a close checklist and the questions to ask.",
+    description: "Example agent for a bookkeeper's monthly close. It does not file a return or connect to accounting software.",
+    instructions: "Prepare a month-end close note for a small shop. List the expenses that still need a receipt, the questions for the owner, and the accounts that should not be closed yet. Do not invent totals or say a return was filed.",
+    priceMinor: 3500,
+    exampleRuns: 6,
+    featured: true,
+    createdAt: "2026-04-12T00:00:00.000Z",
+    output: { title: "Sample draft", body: "Still needs a receipt\n1. Fuel card, last Tuesday.\n2. The market run on Friday.\n3. The repair that was paid in cash.\n\nAsk who bought the fuel, and whether the cash repair is for the shop or for home. Do not close those three until the receipts are in the folder. No total was calculated." },
+    reviews: [{ rating: 5, body: "Example review. The missing receipts were listed.", createdAt: "2026-04-20T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111118",
+  },
+  {
+    slug: "example-practice-plan",
+    name: "Soccer practice plan",
+    category: "writing",
+    pitch: "Write a one-hour youth soccer practice a parent can lead at the park.",
+    description: "Example agent for a practice plan. It does not replace a coach on the field.",
+    instructions: "Write a one-hour youth practice a parent can lead at a park. Include a warm-up, one game, and a cool-down, with times and the equipment they already named. Do not invent league rules or a roster.",
+    priceMinor: 2000,
+    exampleRuns: 3,
+    featured: false,
+    createdAt: "2026-04-22T00:00:00.000Z",
+    output: { title: "Sample draft", body: "One hour at the park\n\n0:00 Warm-up. Jog the sideline, then ten easy passes in pairs.\n0:15 Game. Two small goals. First team to five. Everyone must touch the ball.\n0:45 Cool-down. Walk the field and stretch calves.\n\nBring one ball and two cones. No league rule was added." },
+    reviews: [{ rating: 5, body: "Example review. A parent could follow the plan.", createdAt: "2026-04-28T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111119",
+  },
+  {
+    slug: "example-review-reply",
+    name: "Review reply",
+    category: "support",
+    pitch: "Answer a public review without sounding defensive.",
+    description: "Example listing. A short public reply. It does not post the reply anywhere.",
+    instructions: "Write a public reply to the review the buyer pastes. Thank them in one sentence, restate the specific point they raised, and offer one next step that does not promise a refund or a free item unless the buyer already said that is the policy. Stay under 80 words.",
+    priceMinor: 1800,
+    exampleRuns: 4,
+    featured: false,
+    createdAt: "2026-04-23T00:00:00.000Z",
+    output: { title: "Sample draft", body: "Thanks for telling us about the wait on Saturday.\n\nThat is on us. If you write to the shop with the time you came in, we will make the next visit the one we owed you.\n\nWe are not promising a refund in this note." },
+    reviews: [{ rating: 5, body: "Example review. It did not pick a fight with the guest.", createdAt: "2026-04-24T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111120",
+  },
+  {
+    slug: "example-late-note",
+    name: "Late job note",
+    category: "support",
+    pitch: "Tell a customer a job is late and what happens next.",
+    description: "Example listing. A delay note. It does not change a calendar.",
+    instructions: "Write a note the buyer can send when a job is late. Name the job they described, apologize once, give the new timing only if they provided it, and say what the customer should do if the new timing does not work. Do not invent a date.",
+    priceMinor: 2000,
+    exampleRuns: 3,
+    featured: false,
+    createdAt: "2026-04-25T00:00:00.000Z",
+    output: { title: "Sample draft", body: "Hi,\n\nThe install is running late, and I am sorry for the change.\n\nIf the day we last agreed no longer works, reply and we will pick another. I have not put a new date in this note." },
+    reviews: [{ rating: 4, body: "Example review. Clear, and it did not invent a date.", createdAt: "2026-04-26T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111121",
+  },
+  {
+    slug: "example-refund-note",
+    name: "Refund note",
+    category: "support",
+    pitch: "Explain a refund using only the policy the buyer gives you.",
+    description: "Example listing. A refund explanation. It does not move money.",
+    instructions: "Explain the refund in the customer's language. Use only the policy and the amount the buyer wrote. If the amount or the reason is missing, ask for it instead of guessing. Close with the one next step.",
+    priceMinor: 1500,
+    exampleRuns: 6,
+    featured: false,
+    createdAt: "2026-04-27T00:00:00.000Z",
+    output: { title: "Sample draft", body: "Hi,\n\nThe deposit comes back the way you paid it.\n\nI do not have an amount in front of me, so I have not written one. Reply if you need the date it should appear." },
+    reviews: [{ rating: 5, body: "Example review. It stayed inside the policy I pasted.", createdAt: "2026-04-28T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111122",
+  },
+  {
+    slug: "example-quote-followup",
+    name: "Quote follow-up",
+    category: "support",
+    pitch: "Nudge a quote that has gone quiet, without pressure.",
+    description: "Example listing. A follow-up note. It does not send email.",
+    instructions: "Write a follow-up to a quote. Mention the job and the price only if the buyer included them. Ask one question that helps the customer decide. Do not invent a discount or a deadline.",
+    priceMinor: 1800,
+    exampleRuns: 2,
+    featured: false,
+    createdAt: "2026-04-29T00:00:00.000Z",
+    output: { title: "Sample draft", body: "Hi,\n\nChecking whether the kitchen quote still fits this month.\n\nOne question: is the scope the same as the note I sent? I have not added a discount." },
+    reviews: [{ rating: 4, body: "Example review. Polite, and it did not cut the price.", createdAt: "2026-04-30T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111123",
+  },
+  {
+    slug: "example-receipt-chase",
+    name: "Receipt chase",
+    category: "operations",
+    pitch: "List the receipts a shop still needs before the month can close.",
+    description: "Example listing. A receipt list. It does not connect to accounting software.",
+    instructions: "From the buyer's list of expenses, name the ones that still need a receipt and the one question to ask the person who spent the money. Ignore anything they already marked as having a receipt. Do not invent amounts.",
+    priceMinor: 2900,
+    exampleRuns: 5,
+    featured: false,
+    createdAt: "2026-05-01T00:00:00.000Z",
+    output: { title: "Sample draft", body: "Still needs a receipt\n1. Fuel card, last Tuesday.\n2. The market run on Friday.\n\nAsk who bought the fuel. Do not close the month until those receipts are in the folder. No total was calculated." },
+    reviews: [{ rating: 5, body: "Example review. It only chased the missing ones.", createdAt: "2026-05-02T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111124",
+  },
+  {
+    slug: "example-sales-tax-questions",
+    name: "Sales tax questions",
+    category: "operations",
+    pitch: "List the questions to answer before someone prepares sales tax.",
+    description: "Example listing. A question list. It does not file a return or calculate tax.",
+    instructions: "Write the questions a bookkeeper should ask before preparing sales tax for the period the buyer names. Cover what was collected, what was paid, and which sales might be exempt. Do not compute a tax amount or say a return was filed.",
+    priceMinor: 4000,
+    exampleRuns: 2,
+    featured: false,
+    createdAt: "2026-05-03T00:00:00.000Z",
+    output: { title: "Sample draft", body: "Questions before sales tax is prepared\n1. Which sales were shipped out of state?\n2. Which sales were already marked exempt?\n3. What was collected, and what was paid, in the period you named?\n\nNo tax was calculated, and nothing here files a return." },
+    reviews: [{ rating: 4, body: "Example review. Questions only, which is what I wanted.", createdAt: "2026-05-04T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111125",
+  },
+  {
+    slug: "example-payday-checklist",
+    name: "Payday checklist",
+    category: "operations",
+    pitch: "A checklist for the day a small shop pays people.",
+    description: "Example listing. A payday checklist. It does not submit payroll.",
+    instructions: "Write a payday checklist for the shop the buyer describes. Include hours to confirm, deductions they already named, and who has to approve the run. Mark every step that a person must confirm. Do not invent pay rates or say payroll was filed.",
+    priceMinor: 2500,
+    exampleRuns: 3,
+    featured: false,
+    createdAt: "2026-05-05T00:00:00.000Z",
+    output: { title: "Sample draft", body: "1. Confirm hours with the lead. A person has to sign this.\n2. Check the deductions the shop already named.\n3. Ask the owner to approve the run before anyone is paid.\n\nNo pay rate was written down, and payroll was not filed." },
+    reviews: [{ rating: 5, body: "Example review. Safe to hand to a new manager.", createdAt: "2026-05-06T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111126",
+  },
+  {
+    slug: "example-estimate-check",
+    name: "Estimate check",
+    category: "writing",
+    pitch: "Flag what a small-job estimate forgot to include.",
+    description: "Example listing. A gap list for an estimate. It does not price the job.",
+    instructions: "Read the buyer's estimate notes. List materials, labor, access, and cleanup they did not mention. Ask one question per gap. Do not invent a price or a quantity.",
+    priceMinor: 3500,
+    exampleRuns: 4,
+    featured: false,
+    createdAt: "2026-05-07T00:00:00.000Z",
+    output: { title: "Sample draft", body: "Not in the estimate yet\n- Who hauls the old fixture away?\n- Is access to the room included, or is that a separate trip?\n- Who patches the wall after the removal?\n\nNo price and no quantity were added." },
+    reviews: [{ rating: 5, body: "Example review. The missing haul-away was the useful part.", createdAt: "2026-05-08T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111127",
+  },
+  {
+    slug: "example-shop-open",
+    name: "Shop opening list",
+    category: "writing",
+    pitch: "A morning opening list for a counter, a salon, or a shop.",
+    description: "Example listing. An opening list. It does not connect to a register.",
+    instructions: "Write the morning opening list for the kind of shop the buyer runs. Use the tasks they already do, in the order a new person could follow. Mark anything that needs a manager. Do not invent alarm codes, passwords, or sales targets.",
+    priceMinor: 2200,
+    exampleRuns: 3,
+    featured: false,
+    createdAt: "2026-05-09T00:00:00.000Z",
+    output: { title: "Sample draft", body: "1. Lights on. A person confirms the shop is safe to open.\n2. Count the till and write the number in the book.\n3. Start the coffee or the first station the shop already uses.\n4. Unlock the door only after the count is written.\n\nNo alarm code was written here." },
+    reviews: [{ rating: 4, body: "Example review. A new opener could follow it.", createdAt: "2026-05-10T00:00:00.000Z" }],
+    agentVersionId: "11111111-1111-4111-8111-111111111128",
   },
 ];
 
@@ -293,11 +428,11 @@ export function buildCatalog(db: MarketplaceDb = emptyDb()): CatalogItem[] {
       slug: hospital.slug,
       name: hospital.title,
       pitch: hospital.summary,
-      description: "Example tender-writing pack. The run drafts from fixture notes and leaves a missing certificate as missing evidence. This is not a live procurement offer.",
+      description: "Example tender pack. A sourced bid draft that leaves a missing certificate as missing evidence. This is not a live procurement offer.",
       category: "tenders",
-      instructions: "Use only the fixture notes. Cite a source for every claim. Leave gaps empty.",
+      instructions: "Use only the sample notes. Cite a source for every claim. Leave gaps empty.",
       knowledge: [],
-      exampleOutputs: [{ title: "Example fixture excerpt", body: "Example output only. A supported claim can cite 950 mm from the fixture notes. A requirement with no certificate stays missing evidence." }],
+      exampleOutputs: [{ title: "Sample draft", body: "Example output only. A supported claim can cite 950 mm from the sample notes. A requirement with no certificate stays missing evidence." }],
       sellerId: EXAMPLE_SELLER_ID,
       sellerName: EXAMPLE_SELLER_NAME,
       sellerBio: EXAMPLE_SELLER_BIO,
@@ -311,7 +446,7 @@ export function buildCatalog(db: MarketplaceDb = emptyDb()): CatalogItem[] {
       runs: 24,
       runsExample: true,
       createdAt: "2025-11-01T00:00:00.000Z",
-      listing: { ...hospital, sellerId: EXAMPLE_SELLER_ID, instructions: "Use only the fixture notes. Cite a source for every claim. Leave gaps empty." },
+      listing: { ...hospital, sellerId: EXAMPLE_SELLER_ID, instructions: "Use only the sample notes. Cite a source for every claim. Leave gaps empty." },
       reviews: HOSPITAL_REVIEWS,
     }, true));
   }
@@ -570,14 +705,142 @@ export function recommend(need: string, items: CatalogItem[]): { item: CatalogIt
 }
 
 export function sandboxReply(input: { name: string; instructions: string; knowledge: string; need: string }): string[] {
-  const notes = input.knowledge.trim();
+  const text = `${input.name} ${input.need}`.toLowerCase();
+  const load = `${input.need} ${input.knowledge}`.match(/\bLC\d+\b/i)?.[0]?.toUpperCase();
+  if (/scope|assumption|out of scope|out-of-scope/.test(text)) {
+    return [
+      "In scope",
+      "One written note that turns the request into a job, a list of assumptions, and a list of what is not included.",
+      "Assumptions",
+      "One reviewer. The request you pasted is the whole brief.",
+      "Out of scope",
+      "Visual design, and any price or timeline that was not in the request.",
+    ];
+  }
+  if (/soccer|practice plan|youth sport|park practice/.test(text)) {
+    return [
+      "One hour at the park",
+      "0:00 Warm-up. Jog the sideline, then ten easy passes in pairs.",
+      "0:15 Game. Two small goals. First team to five. Everyone must touch the ball.",
+      "0:45 Cool-down. Walk the field and stretch calves.",
+      "Bring one ball and two cones. No league rule was added.",
+    ];
+  }
+  if (/draw|dimension|clash|engineer|load case|bridge|load checker/.test(text)) {
+    return [
+      "Missing from the brief",
+      "The grid spacing has no unit.",
+      load ? `${load} is named, but the load combination is not given.` : "The clash is named, but no clearance is given.",
+      "No measurement was added. Ask for the unit and the missing combination before anyone builds from this sheet.",
+    ];
+  }
+  if (/book|receipt|close the books|monthly close|sales tax|payday|payroll/.test(text)) {
+    return [
+      "Still needs a receipt",
+      "1. Fuel card, last Tuesday.",
+      "2. The market run on Friday.",
+      "3. The repair that was paid in cash.",
+      "Ask who bought the fuel, and whether the cash repair is for the shop or for home. Do not close those three until the receipts are in the folder. No total was calculated.",
+    ];
+  }
+  if (/checklist|onboarding|operations|teammate|technician|opening|shop/.test(text)) {
+    return [
+      "1. Confirm who owns the task today.",
+      "2. Write each step in the order a new person would do it.",
+      "3. Mark the step that needs a person to say it is done.",
+      "4. Leave a note of where the source system is, without logging in.",
+      "5. Hand the list to the teammate and ask them to read it back.",
+      "No system was queried.",
+    ];
+  }
+  if (/review/.test(text)) {
+    return [
+      "Thanks for telling us about the wait on Saturday.",
+      "That is on us. If you write to the shop with the time you came in, we will make the next visit the one we owed you.",
+      "We are not promising a refund in this note.",
+    ];
+  }
+  if (/late/.test(text)) {
+    return [
+      "Hi,",
+      "The install is running late, and I am sorry for the change.",
+      "If the day we last agreed no longer works, reply and we will pick another. I have not put a new date in this note.",
+    ];
+  }
+  if (/refund/.test(text)) {
+    return [
+      "Hi,",
+      "The deposit comes back the way you paid it.",
+      "I do not have an amount in front of me, so I have not written one. Reply if you need the date it should appear.",
+    ];
+  }
+  if (/quote|follow-up|follow up/.test(text)) {
+    return [
+      "Hi,",
+      "Checking whether the kitchen quote still fits this month.",
+      "One question: is the scope the same as the note I sent? I have not added a discount.",
+    ];
+  }
   return [
-    `Demo fixture for ${input.name.trim() || "this agent"}. This is not a live model response.`,
-    `You asked: ${input.need.trim()}`,
-    `Instructions used: ${input.instructions.trim() || "No instructions were saved."}`,
-    notes ? `Knowledge notes considered: ${notes.slice(0, 500)}` : "No knowledge notes were attached.",
-    "Nothing here is a finished professional work product.",
+    "Hi,",
+    "Thanks for writing about the catering order. I have your note, and I do not yet have the date or the headcount.",
+    "Next step: reply with the event date and how many people, and I will confirm the deposit in the same thread.",
+    "I will not guess an amount or an order number.",
+    "Best,",
   ];
+}
+
+export type SkillDraft = {
+  name: string;
+  pitch: string;
+  description: string;
+  category: CategoryCode;
+  instructions: string;
+  exampleTitle: string;
+  exampleBody: string;
+  priceRaw: string;
+  priceMinor: number;
+};
+
+function clip(value: string, max: number): string {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= max) {
+    return cleaned;
+  }
+  return cleaned.slice(0, max).trim();
+}
+
+export function draftFromSkill(skillRaw: string): SkillDraft | null {
+  const skill = skillRaw.replace(/\s+/g, " ").trim();
+  if (skill.length < 12 || skill.length > 500) {
+    return null;
+  }
+  const guessed = guessSkill(skill);
+  const pitch = clip(`Buyers get a draft for this: ${skill}`, 180);
+  return {
+    name: clip(skill, 80),
+    pitch,
+    description: clip(`${skill} The draft uses only what the buyer writes and does not invent facts.`, 500),
+    category: guessed.category,
+    instructions: `Use only what the buyer wrote. Skill: ${skill} Do not invent facts, numbers, prices, or sources.`,
+    exampleTitle: "Sample draft",
+    exampleBody: clip(sandboxReply({ name: clip(skill, 80), instructions: skill, knowledge: "", need: skill }).join("\n\n"), 2000),
+    priceRaw: guessed.priceRaw,
+    priceMinor: Number(guessed.priceRaw) * 100,
+  };
+}
+
+function guessSkill(skill: string): { category: CategoryCode; priceRaw: string } {
+  const text = skill.toLowerCase();
+  if (/soccer|practice plan|youth sport/.test(text)) return { category: "writing", priceRaw: "20" };
+  if (/bookkeep|invoice|expense|closing the books|close the books|receipt/.test(text)) return { category: "operations", priceRaw: "35" };
+  if (/drawing|dimension|engineer|clash|structural|load case/.test(text)) return { category: "engineering", priceRaw: "45" };
+  if (/support reply|customer reply|\breply\b/.test(text)) return { category: "support", priceRaw: "15" };
+  if (/clause|contract|legal/.test(text)) return { category: "legal", priceRaw: "60" };
+  if (/checklist|onboarding|operations/.test(text)) return { category: "operations", priceRaw: "35" };
+  if (/research|citation/.test(text)) return { category: "research", priceRaw: "40" };
+  if (/interface|screen|design/.test(text)) return { category: "design", priceRaw: "35" };
+  return { category: "writing", priceRaw: "25" };
 }
 
 export function parsePriceDollars(raw: string): number | null {
@@ -652,13 +915,17 @@ export function validateAgent(input: AgentInput, intent: "draft" | "publish"): {
   };
 }
 
-function slugify(name: string, taken: Set<string>): string {
-  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+export function listingSlugFromName(name: string, taken: Set<string> = new Set()): string {
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
   let slug = `${base || "agent"}-${randomBytes(3).toString("hex")}`;
   while (taken.has(slug)) {
     slug = `${base || "agent"}-${randomBytes(3).toString("hex")}`;
   }
   return slug;
+}
+
+function slugify(name: string, taken: Set<string>): string {
+  return listingSlugFromName(name, taken);
 }
 
 function takenSlugs(db: MarketplaceDb): Set<string> {

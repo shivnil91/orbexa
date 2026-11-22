@@ -3,91 +3,95 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { AgentCard } from "@/components/agent-card";
+import { JobMark, laneForCategory } from "@/components/job-mark";
 import { primaryButton, secondaryButton } from "@/components/styles";
 import { t } from "@/lib/i18n";
 import { isSupportedLocale } from "@/lib/locale";
-import { CATEGORIES } from "@/lib/marketplace";
+import type { CatalogItem } from "@/lib/marketplace";
 import { loadCatalog } from "@/server/catalog";
+
+const LANES = [
+  { id: "all", label: "All jobs" },
+  { id: "replies", label: "Replies" },
+  { id: "books", label: "Bookkeeping" },
+  { id: "plans", label: "Plans & checks" },
+] as const;
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const { locale } = await params;
   return { title: "Marketplace", description: t(isSupportedLocale(locale) ? locale : "en", "meta.description") };
 }
 
-export default async function LocaleHome({ params }: { params: Promise<{ locale: string }> }) {
+function shelf(items: CatalogItem[], lane: string): CatalogItem[] {
+  return items
+    .filter((item) => item.status === "published" && laneForCategory(item.category))
+    .filter((item) => lane === "all" || laneForCategory(item.category) === lane)
+    .sort((left, right) => left.priceMinor - right.priceMinor || left.name.localeCompare(right.name));
+}
+
+export default async function LocaleHome({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ lane?: string }>;
+}) {
   const { locale } = await params;
   await connection();
+  const query = await searchParams;
   if (!isSupportedLocale(locale)) {
     notFound();
   }
-  const published = (await loadCatalog()).filter((item) => item.status === "published");
-  const featured = published.filter((item) => item.featured).slice(0, 3);
-  const trending = [...published].sort((left, right) => right.runs - left.runs).slice(0, 4);
-  const newest = [...published].sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, 4);
+  const lane = LANES.some((item) => item.id === query.lane) ? query.lane ?? "all" : "all";
+  const jobs = shelf(await loadCatalog(), lane);
   return (
-    <main id="content" className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-12 px-4 py-8 sm:px-8 sm:py-12">
+    <main id="content" className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-10 px-4 py-8 sm:px-8 sm:py-12">
       <section className="max-w-3xl">
-        <p className="text-sm font-medium text-muted">{t(locale, "home.eyebrow")}</p>
-        <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">{t(locale, "home.title")}</h1>
-        <p className="mt-4 text-lg leading-8 text-muted">{t(locale, "home.lede")}</p>
-        <form action={`/${locale}/search`} className="mt-6 flex flex-col gap-2 sm:flex-row" method="get">
-          <label className="sr-only" htmlFor="q">{t(locale, "home.searchLabel")}</label>
-          <input className="min-h-12 w-full flex-1 rounded-full border border-line bg-surface px-4 text-base" id="q" name="q" placeholder={t(locale, "home.searchPlaceholder")} />
-          <button className={primaryButton} type="submit">{t(locale, "home.searchSubmit")}</button>
-        </form>
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <Link className={primaryButton} href={`/${locale}/sell`}>{t(locale, "home.primary")}</Link>
-          <Link className={secondaryButton} href={`/${locale}/search`}>{t(locale, "home.secondary")}</Link>
+        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-accent">{t(locale, "home.eyebrow")}</p>
+        <h1 className="mt-3 text-4xl font-semibold leading-tight tracking-tight sm:text-6xl">{t(locale, "home.title")}</h1>
+        <p className="mt-4 text-lg leading-8">{t(locale, "home.lede")}</p>
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <Link className={primaryButton} href={`/${locale}/get`}>{t(locale, "home.buyerDoor")}</Link>
+          <Link className={secondaryButton} href={`/${locale}/earn`}>{t(locale, "home.sellerDoor")}</Link>
         </div>
       </section>
-      <section>
-        <h2 className="text-2xl font-semibold">{t(locale, "home.categories")}</h2>
-        <p className="mt-2 text-sm text-muted">{t(locale, "home.categoriesNote")}</p>
-        <ul className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {CATEGORIES.map((category) => (
-            <li key={category.code}>
-              <Link className="block h-full rounded-2xl border border-line bg-surface p-4 hover:border-accent" href={`/${locale}/listings?category=${category.code}`}>
-                <span className="font-medium">{t(locale, `category.${category.code}`)}</span>
-                <span className="mt-2 block text-sm leading-6 text-muted">{t(locale, `category.${category.code}.body`)}</span>
-              </Link>
+      <section aria-label={t(locale, "home.how")}>
+        <h2 className="text-2xl font-semibold">{t(locale, "home.how")}</h2>
+        <ol className="mt-4 grid gap-3 sm:grid-cols-3">
+          {(["replies", "books", "plans"] as const).map((step, index) => (
+            <li key={step} className="rounded-3xl border border-line bg-surface p-4">
+              <JobMark lane={step} />
+              <h3 className="mt-3 text-lg font-semibold">{t(locale, `home.how${index + 1}`)}</h3>
+              <p className="mt-1 text-sm leading-6 text-muted">{t(locale, `home.how${index + 1}.body`)}</p>
             </li>
           ))}
-        </ul>
+        </ol>
       </section>
       <section>
-        <h2 className="text-2xl font-semibold">{t(locale, "home.featured")}</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">{t(locale, "home.featuredNote")}</p>
-        <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {featured.map((item) => <li key={item.slug}><AgentCard item={item} locale={locale} /></li>)}
+        <div className="flex items-end justify-between gap-3">
+          <h2 className="text-2xl font-semibold">{t(locale, "home.shelf")}</h2>
+        </div>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">{t(locale, "home.shelfNote")}</p>
+        <ul className="mt-4 flex gap-2 overflow-x-auto pb-1">
+          {LANES.map((item) => {
+            const active = item.id === lane;
+            return (
+              <li key={item.id}>
+                <Link
+                  className={`inline-flex min-h-12 items-center gap-2 rounded-full border px-4 text-sm font-semibold ${active ? "border-accent bg-accent text-accent-foreground" : "border-line bg-surface"}`}
+                  href={item.id === "all" ? `/${locale}` : `/${locale}?lane=${item.id}`}
+                  aria-current={active ? "true" : undefined}
+                >
+                  {item.id !== "all" ? <JobMark lane={item.id} size="sm" /> : null}
+                  {item.label}
+                </Link>
+              </li>
+            );
+          })}
         </ul>
-      </section>
-      <div className="grid gap-10 lg:grid-cols-2">
-        <section>
-          <h2 className="text-2xl font-semibold">{t(locale, "home.trending")}</h2>
-          <p className="mt-2 text-sm leading-6 text-muted">{t(locale, "home.trendingNote")}</p>
-          <ul className="mt-4 grid gap-4">
-            {trending.map((item) => <li key={item.slug}><AgentCard item={item} locale={locale} /></li>)}
-          </ul>
-        </section>
-        <section>
-          <h2 className="text-2xl font-semibold">{t(locale, "home.new")}</h2>
-          <ul className="mt-4 grid gap-4">
-            {newest.map((item) => <li key={item.slug}><AgentCard item={item} locale={locale} /></li>)}
-          </ul>
-        </section>
-      </div>
-      <section className="grid gap-4 md:grid-cols-3">
-        {(["home.step1", "home.step2", "home.step3"] as const).map((key) => (
-          <article key={key} className="rounded-2xl border border-line bg-surface p-5">
-            <h2 className="text-lg font-medium">{t(locale, `${key}.title`)}</h2>
-            <p className="mt-2 text-sm leading-6 text-muted">{t(locale, `${key}.body`)}</p>
-          </article>
-        ))}
-      </section>
-      <section className="rounded-2xl border border-line p-5">
-        <h2 className="text-lg font-medium">{t(locale, "home.packTitle")}</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">{t(locale, "home.packBody")}</p>
-        <Link className="mt-4 inline-flex min-h-11 items-center underline" href={`/${locale}/listings/hospital-beds`}>{t(locale, "home.packLink")}</Link>
+        <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {jobs.map((item) => <li key={item.slug}><AgentCard item={item} locale={locale} /></li>)}
+        </ul>
       </section>
     </main>
   );

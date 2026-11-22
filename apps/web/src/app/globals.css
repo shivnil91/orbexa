@@ -6,15 +6,15 @@
   --muted: #44403c;
   --surface: #fffcf7;
   --line: #d6d3d1;
-  --accent: #123f3c;
-  --accent-foreground: #f8fffe;
+  --accent: #4c1d95;
+  --accent-foreground: #f5f3ff;
   --missing: #7f1d1d;
   --missing-bg: #fef2f2;
   --supported: #14532d;
   --supported-bg: #f0fdf4;
   --warning: #78350f;
   --warning-bg: #fffbeb;
-  --focus: #115e59;
+  --focus: #5b21b6;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,15 +24,15 @@
     --muted: #d6d3d1;
     --surface: #1c1917;
     --line: #44403c;
-    --accent: #123f3c;
-    --accent-foreground: #f8fffe;
+    --accent: #4c1d95;
+    --accent-foreground: #f5f3ff;
     --missing: #fecaca;
     --missing-bg: #450a0a;
     --supported: #bbf7d0;
     --supported-bg: #052e16;
     --warning: #fde68a;
     --warning-bg: #451a03;
-    --focus: #5eead4;
+    --focus: #ddd6fe;
   }
 }
 
@@ -59,6 +59,19 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), "Geist", "Segoe UI", sans-serif;
   overflow-x: clip;
+}
+
+.font-display,
+h1,
+h2,
+h3 {
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+}
+
+@media (max-width: 639px) {
+  .mobile-cta-space {
+    padding-bottom: 5.5rem;
+  }
 }
 
 :focus-visible {
