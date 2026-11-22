@@ -57,7 +57,7 @@ CREATE TABLE feedback_events (
   )),
   reward numeric(6, 4),
   edit_distance integer,
-  rubric_code text,
+  rubric_code text CHECK (rubric_code IS NULL OR rubric_code ~ '^[a-z0-9_]{1,64}$'),
   score numeric(6, 4),
   rating smallint,
   suspect boolean NOT NULL DEFAULT false,
@@ -186,12 +186,29 @@ CREATE TRIGGER policy_candidates_status
   BEFORE UPDATE OF status ON policy_candidates
   FOR EACH ROW EXECUTE FUNCTION app.guard_policy_status();
 
+CREATE OR REPLACE FUNCTION app.guard_policy_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public, app
+AS $$
+BEGIN
+  IF NEW.status IS DISTINCT FROM 'proposed' THEN
+    RAISE EXCEPTION 'a policy starts as proposed';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER policy_candidates_insert
+  BEFORE INSERT ON policy_candidates
+  FOR EACH ROW EXECUTE FUNCTION app.guard_policy_insert();
+
 CREATE TABLE bandit_arms (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL REFERENCES orgs (id),
   home_region text NOT NULL REFERENCES processing_regions (id),
   kind text NOT NULL CHECK (kind IN ('prompt', 'model', 'strategy')),
-  arm_code text NOT NULL,
+  arm_code text NOT NULL CHECK (arm_code ~ '^[a-z0-9][a-z0-9._-]{0,63}$'),
   pulls integer NOT NULL DEFAULT 0 CHECK (pulls >= 0),
   reward_sum numeric(8, 4) NOT NULL DEFAULT 0,
   status text NOT NULL DEFAULT 'shadow' CHECK (status IN ('shadow', 'active', 'halted')),
@@ -206,6 +223,29 @@ COMMENT ON TABLE bandit_arms IS
 CREATE TRIGGER bandit_arms_region
   BEFORE INSERT OR UPDATE OF home_region ON bandit_arms
   FOR EACH ROW EXECUTE FUNCTION app.assert_home_region();
+
+CREATE OR REPLACE FUNCTION app.guard_bandit_arm()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public, app
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' AND NEW.status IS DISTINCT FROM 'shadow' THEN
+    RAISE EXCEPTION 'new bandit arms start in shadow';
+  END IF;
+  IF TG_OP = 'UPDATE' AND OLD.status = 'halted' AND NEW.status IS DISTINCT FROM 'halted' THEN
+    RAISE EXCEPTION 'a halted bandit arm stays halted';
+  END IF;
+  IF NEW.status = 'active' AND NEW.offline_score IS NULL THEN
+    RAISE EXCEPTION 'offline evaluation is required before a bandit arm is active';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER bandit_arms_guard
+  BEFORE INSERT OR UPDATE ON bandit_arms
+  FOR EACH ROW EXECUTE FUNCTION app.guard_bandit_arm();
 
 CREATE TABLE bandit_decisions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -296,10 +336,49 @@ $$;
 COMMENT ON FUNCTION app.consider_preference_export IS
   'Returns hashes when consent and founder authorisation both exist. It does not fine-tune.';
 
+CREATE OR REPLACE FUNCTION app.record_offline_result(p_id uuid, p_offline numeric, p_baseline numeric)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, app
+AS $$
+DECLARE
+  candidate policy_candidates%ROWTYPE;
+BEGIN
+  IF p_offline IS NULL OR p_baseline IS NULL
+    OR p_offline < 0 OR p_offline > 1
+    OR p_baseline < 0 OR p_baseline > 1
+    OR p_offline < p_baseline
+  THEN
+    RAISE EXCEPTION 'offline evaluation is required before a policy change';
+  END IF;
+  SELECT * INTO candidate FROM policy_candidates WHERE id = p_id;
+  IF candidate.id IS NULL THEN
+    RAISE EXCEPTION 'policy not found';
+  END IF;
+  IF candidate.tenant_id IS DISTINCT FROM app.current_tenant() THEN
+    RAISE EXCEPTION 'policy is not in this tenant';
+  END IF;
+  IF candidate.status IS DISTINCT FROM 'proposed' AND candidate.status IS DISTINCT FROM 'offline_passed' THEN
+    RAISE EXCEPTION 'offline evaluation is required before a policy change';
+  END IF;
+  UPDATE policy_candidates
+  SET status = 'offline_passed',
+      offline_score = p_offline,
+      baseline_score = p_baseline
+  WHERE id = p_id;
+END;
+$$;
+
+COMMENT ON FUNCTION app.record_offline_result IS
+  'Records an offline score for this tenant. It does not activate the policy and it does not train.';
+
+REVOKE ALL ON FUNCTION app.record_offline_result(uuid, numeric, numeric) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION app.activate_policy(p_id uuid)
 RETURNS void
 LANGUAGE plpgsql
-SECURITY INVOKER
+SECURITY DEFINER
 SET search_path = pg_catalog, public, app
 AS $$
 DECLARE
@@ -405,8 +484,14 @@ CREATE POLICY bandit_decisions_isolation ON bandit_decisions
 GRANT SELECT, INSERT, UPDATE ON training_consents TO orbexa_app;
 GRANT SELECT ON training_authorisations TO orbexa_app;
 GRANT SELECT, INSERT ON feedback_events, preference_pairs, bandit_decisions TO orbexa_app, orbexa_worker;
-GRANT SELECT, INSERT, UPDATE ON bandit_arms, policy_candidates TO orbexa_app;
+GRANT SELECT, INSERT, UPDATE ON bandit_arms TO orbexa_app;
+GRANT SELECT, INSERT ON policy_candidates TO orbexa_app;
 GRANT EXECUTE ON FUNCTION app.consider_preference_export(uuid) TO orbexa_app;
+GRANT EXECUTE ON FUNCTION app.record_offline_result(uuid, numeric, numeric) TO orbexa_app;
 GRANT EXECUTE ON FUNCTION app.activate_policy(uuid) TO orbexa_app;
 GRANT EXECUTE ON FUNCTION app.select_bandit_arm(uuid, text) TO orbexa_app, orbexa_worker;
 GRANT EXECUTE ON FUNCTION app.grant_founder_authorisation(uuid, text) TO orbexa_app;
+
+REVOKE ALL ON FUNCTION app.consider_preference_export(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.activate_policy(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.select_bandit_arm(uuid, text) FROM PUBLIC;

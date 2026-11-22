@@ -5,7 +5,14 @@ import path from "node:path";
 import { listingBySlug, packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
 import { validateFeedback, type FeedbackInput, type FeedbackKind } from "@orbexa/db/feedback.ts";
 import { validateIntake } from "./intake.ts";
-import { checkoutPlan, type CheckoutPlan } from "./payments.ts";
+import {
+  checkoutPlan,
+  sendStripeTestCheckout,
+  stripeTestTransport,
+  type CheckoutPlan,
+  type StripeTransport,
+  type VerifiedStripeEvent,
+} from "./payments.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -60,6 +67,7 @@ export type JobRecord = {
   startedAt: number | null;
   finishedAt: number | null;
   metricsWritten: boolean;
+  processedStripeEvents: string[];
 };
 
 const locks = new Map<string, Promise<unknown>>();
@@ -150,6 +158,7 @@ export async function createJob(input: {
     startedAt: null,
     finishedAt: null,
     metricsWritten: false,
+    processedStripeEvents: [],
   };
   const plan = checkoutPlan({
     orderId: job.id,
@@ -165,25 +174,84 @@ export async function createJob(input: {
   return job;
 }
 
-export async function payJob(id: string): Promise<JobRecord> {
+function snapshotInput(job: JobRecord) {
+  return {
+    orderId: job.id,
+    amountMinor: job.priceMinor,
+    currency: job.currency,
+    reviewFeeMinor: job.reviewFeeMinor,
+    platformFeeBps: 0,
+    platformFeeMinor: job.platformFeeMinor,
+    creatorRoyaltyMinor: job.creatorRoyaltyMinor,
+  };
+}
+
+function stripeNetworkEnabled(env: NodeJS.ProcessEnv): boolean {
+  const key = env.STRIPE_TEST_SECRET_KEY ?? "";
+  return env.PAYMENT_PROVIDER === "stripe" && key.startsWith("sk_test_") && env.STRIPE_TEST_NETWORK === "1";
+}
+
+export async function payJob(id: string, transport: StripeTransport = stripeTestTransport): Promise<JobRecord> {
   return withLock(id, async () => {
     const job = await readJob(id);
     if (!job) {
       throw new Error("job not found");
     }
-    const listing = listingBySlug(job.listingSlug);
-    const tier = listing?.tiers.find((item) => item.serviceLevel === job.serviceLevel);
-    if (!tier) {
-      throw new Error("service level not found");
+    if (job.status !== "checkout") {
+      return job;
     }
-    job.payment = checkoutPlan({
-      orderId: job.id,
-      amountMinor: tier.priceMinor,
-      currency: tier.currency,
-      reviewFeeMinor: tier.reviewFeeMinor,
-      platformFeeBps: tier.platformFeeBps,
-    });
+    const input = snapshotInput(job);
+    const plan = checkoutPlan(input);
+    if (!stripeNetworkEnabled(process.env)) {
+      job.payment = plan;
+      job.status = "queued";
+      await writeJob(job);
+      return job;
+    }
+    if (job.payment?.id.startsWith("cs_test_")) {
+      return job;
+    }
+    const session = await sendStripeTestCheckout(input, process.env, transport);
+    job.payment = { ...plan, mode: "stripe_test", simulated: true, id: session.id };
+    await writeJob(job);
+    return job;
+  });
+}
+
+export async function applyVerifiedStripePayment(event: VerifiedStripeEvent): Promise<JobRecord> {
+  if (event.type !== "payment.captured" || event.livemode !== false) {
+    throw new Error("event is not a test capture");
+  }
+  return withLock(event.orderId, async () => {
+    const job = await readJob(event.orderId);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    const seen = job.processedStripeEvents ?? [];
+    if (seen.includes(event.id)) {
+      return job;
+    }
+    if (
+      event.amountMinor !== job.priceMinor
+      || event.currency !== job.currency
+      || event.platformFeeMinor !== job.platformFeeMinor
+      || event.creatorRoyaltyMinor !== job.creatorRoyaltyMinor
+      || event.reviewFeeMinor !== job.reviewFeeMinor
+      || event.taxMinor !== 0
+    ) {
+      throw new Error("amount does not match the order snapshot");
+    }
+    if (job.status !== "checkout") {
+      if (job.payment) {
+        return job;
+      }
+      throw new Error("job is not awaiting payment");
+    }
+    const plan = checkoutPlan(snapshotInput(job));
+    const sessionId = job.payment?.id.startsWith("cs_test_") ? job.payment.id : plan.id;
+    job.payment = { ...plan, mode: "stripe_test", simulated: true, id: sessionId };
     job.status = "queued";
+    job.processedStripeEvents = [...seen, event.id];
     await writeJob(job);
     return job;
   });
@@ -221,6 +289,20 @@ export async function recordJobFeedback(
     if (!job) {
       throw new Error("job not found");
     }
+    const buyerSignal = input.kind === "buyer_approve"
+      || input.kind === "buyer_edit"
+      || input.kind === "buyer_reject"
+      || input.kind === "edit_distance"
+      || input.kind === "tender_win"
+      || input.kind === "tender_loss";
+    const reviewOpen = job.status === "waiting_for_buyer" || job.status === "accepted" || job.status === "rejected";
+    const expertOpen = reviewOpen || job.status === "waiting_for_expert";
+    if (buyerSignal && !reviewOpen) {
+      throw new Error("feedback is not available for this job");
+    }
+    if (!buyerSignal && !expertOpen) {
+      throw new Error("feedback is not available for this job");
+    }
     const feedback: FeedbackInput = {
       tenantId: job.tenantId,
       homeRegion: "local",
@@ -244,10 +326,10 @@ export async function recordJobFeedback(
       rating: input.rating ?? null,
       at: new Date().toISOString(),
     });
-    if (input.kind === "buyer_approve") {
+    if (input.kind === "buyer_approve" && job.status === "waiting_for_buyer") {
       job.status = "accepted";
     }
-    if (input.kind === "buyer_reject") {
+    if (input.kind === "buyer_reject" && job.status === "waiting_for_buyer") {
       job.status = "rejected";
     }
     await writeJob(job);
@@ -263,6 +345,9 @@ export async function recordExpertSignal(id: string): Promise<JobRecord> {
     }
     if (job.serviceLevel === "autonomous") {
       return job;
+    }
+    if (job.status !== "waiting_for_expert") {
+      throw new Error("expert approval is not available for this job");
     }
     job.approvalSignal = "approve";
     job.status = "waiting_for_buyer";

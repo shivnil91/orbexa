@@ -25,6 +25,7 @@ let db: Sql;
 let pg: PgHandle | undefined;
 let jobA = "";
 let jobB = "";
+let embeddingModel = "";
 
 before(async () => {
   if (process.env.PG16 === "1") {
@@ -56,6 +57,7 @@ before(async () => {
     INSERT INTO model_routes (code, primary_model) VALUES ('rl-fixture', 'fixture');
   `);
   const modelId = (await db.query<{ id: string }>("SELECT id::text AS id FROM embedding_models")).rows[0].id;
+  embeddingModel = modelId;
   const routeId = (await db.query<{ id: string }>("SELECT id::text AS id FROM model_routes")).rows[0].id;
   await db.exec(`
     INSERT INTO agents (id, creator_org_id, slug, name, vertical, source_locale)
@@ -141,6 +143,14 @@ test("feedback is tenant-isolated and a fake edit is flagged", async () => {
     reward: 1,
     editDistance: 0,
   });
+  await assert.rejects(
+    db.query(
+      `INSERT INTO feedback_events (tenant_id, home_region, job_id, kind, rubric_code, score)
+       VALUES ($1, 'local', $2, 'judge_score', 'the buyer tender text', 1)`,
+      [buyerA, jobA],
+    ),
+    /check|rubric/i,
+  );
   const flagged = await db.query<{ suspect: boolean }>(
     "SELECT suspect FROM feedback_events WHERE kind = 'buyer_edit'",
   );
@@ -175,6 +185,22 @@ test("training export needs org opt-in and founder authorisation, and does not t
     asApp({}, "SELECT app.grant_founder_authorisation($1, $2)", [buyerA, "not from the app"]),
     /application/i,
   );
+  await assert.rejects(
+    asApp(
+      { tenant_id: buyerA, access: "org", user_id: userA },
+      `INSERT INTO training_authorisations (org_id, home_region, authorised, note)
+       VALUES ($1, 'local', true, 'the app wrote this')`,
+      [buyerA],
+    ),
+    /permission denied/i,
+  );
+  await db.exec("RESET ROLE");
+  await db.exec("SET ROLE orbexa_finance");
+  await assert.rejects(
+    db.query("SELECT * FROM app.consider_preference_export($1)", [pairId]),
+    /permission denied/i,
+  );
+  await db.exec("RESET ROLE");
   await db.query("SELECT app.grant_founder_authorisation($1, $2)", [buyerA, "founder recorded this gate"]);
   const exported = await db.query<{ chosen_hash: string }>(
     "SELECT chosen_hash FROM app.consider_preference_export($1)",
@@ -200,6 +226,14 @@ test("a policy cannot go active without an offline score, and the bandit flag ga
   );
   await db.query("SELECT set_config('app.tenant_id', $1, false)", [buyerA]);
   await assert.rejects(db.query("SELECT app.activate_policy($1)", [proposed.rows[0].id]), /offline/i);
+  await assert.rejects(
+    db.query(
+      `INSERT INTO policy_candidates (tenant_id, home_region, code, status)
+       VALUES ($1, 'local', 'already-active', 'active')`,
+      [buyerA],
+    ),
+    /proposed/i,
+  );
   await db.query(
     `UPDATE policy_candidates
      SET status = 'offline_passed', offline_score = 0.8, baseline_score = 0.6
@@ -209,10 +243,32 @@ test("a policy cannot go active without an offline score, and the bandit flag ga
   await db.query("SELECT app.activate_policy($1)", [proposed.rows[0].id]);
   const active = await db.query<{ status: string }>("SELECT status FROM policy_candidates WHERE code = 'prompt-v2'");
   assert.equal(active.rows[0].status, "active");
+  await assert.rejects(
+    asApp(
+      { tenant_id: buyerA, access: "org", user_id: userA, job_id: jobA },
+      "UPDATE policy_candidates SET status = 'proposed' WHERE code = 'prompt-v2'",
+    ),
+    /permission denied/i,
+  );
+  await db.exec("RESET ROLE");
+  await assert.rejects(
+    db.query(
+      `INSERT INTO bandit_arms (
+         tenant_id, home_region, kind, arm_code, pulls, reward_sum, status
+       ) VALUES ($1, 'local', 'model', 'fixture-b', 2, 1.0, 'active')`,
+      [buyerA],
+    ),
+    /shadow/i,
+  );
   await db.query(
     `INSERT INTO bandit_arms (
        tenant_id, home_region, kind, arm_code, pulls, reward_sum, status, offline_score
-     ) VALUES ($1, 'local', 'model', 'fixture-b', 2, 1.0, 'active', 0.5)`,
+     ) VALUES ($1, 'local', 'model', 'fixture-b', 2, 1.0, 'shadow', 0.5)`,
+    [buyerA],
+  );
+  await db.query(
+    `UPDATE bandit_arms SET status = 'active'
+     WHERE tenant_id = $1 AND arm_code = 'fixture-b'`,
     [buyerA],
   );
   const gated = await db.query<{ arm: string | null }>(
@@ -226,4 +282,62 @@ test("a policy cannot go active without an offline score, and the bandit flag ga
     [buyerA],
   );
   assert.equal(chosen.rows[0].arm, "fixture-b");
+  await db.query("UPDATE bandit_arms SET status = 'halted' WHERE arm_code = 'fixture-b'");
+  await assert.rejects(
+    db.query("UPDATE bandit_arms SET status = 'active' WHERE arm_code = 'fixture-b'"),
+    /halted/i,
+  );
+  await db.query("SELECT set_config('app.bandit', '', false)");
+});
+
+test("retrieve_memory keeps another tenant's memory when RLS is bypassed", async () => {
+  await db.exec("RESET ROLE");
+  const provenance = await db.query<{ id: string }>(
+    `INSERT INTO memory_provenance (tenant_id, home_region, source_type, content_hash)
+     VALUES ($1, 'local', 'creator_authored', $2)
+     RETURNING id::text AS id`,
+    [creator, hash],
+  );
+  const item = await db.query<{ id: string }>(
+    `INSERT INTO memory_items (
+       logical_id, version, owner_org_id, tenant_id, home_region, scope, authority,
+       provenance_id, agent_id, body, content_hash
+     ) VALUES (
+       gen_random_uuid(), 1, $1, $1, 'local', 'creator_expertise', 'owner',
+       $2, 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+       'customer clause stays in the creator tenant', $3
+     ) RETURNING id::text AS id`,
+    [creator, provenance.rows[0].id, otherHash],
+  );
+  const vector = `('[' || repeat('1,', 1535) || '1]')::vector(1536)`;
+  await db.exec(`
+    INSERT INTO memory_embeddings (memory_item_id, tenant_id, home_region, scope, model_id, embedding)
+    VALUES ('${item.rows[0].id}', '${creator}', 'local', 'creator_expertise', '${embeddingModel}', ${vector})
+  `);
+  await db.query("SELECT set_config('app.tenant_id', $1, false)", [buyerA]);
+  await db.query("SELECT set_config('app.job_id', $1, false)", [jobA]);
+  const leaked = await db.query<{ id: string }>(
+    `SELECT memory_item_id::text AS id
+     FROM app.retrieve_memory(
+       'creator_expertise',
+       'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+       '${embeddingModel}',
+       ${vector},
+       5
+     )`,
+  );
+  assert.equal(leaked.rows.length, 0);
+  await db.query("SELECT set_config('app.tenant_id', $1, false)", [creator]);
+  const own = await db.query<{ id: string }>(
+    `SELECT memory_item_id::text AS id
+     FROM app.retrieve_memory(
+       'creator_expertise',
+       'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+       '${embeddingModel}',
+       ${vector},
+       5
+     )`,
+  );
+  assert.deepEqual(own.rows.map((row) => row.id), [item.rows[0].id]);
+  assert.equal(JSON.stringify(own.rows).includes("customer clause"), false);
 });

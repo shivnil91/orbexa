@@ -9,6 +9,7 @@ row-level security: the session GUCs are set to the job tenant before writes.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -121,9 +122,13 @@ class MemoryOpsStore:
         return used + 1
 
     def cache_get(self, tenant_id: str, model: str, prompt_hash: str) -> CacheEntry | None:
+        if not cache_key_allowed(tenant_id, model, prompt_hash):
+            return None
         return self.cache.get((tenant_id, model, prompt_hash))
 
     def cache_put(self, tenant_id: str, model: str, prompt_hash: str, entry: CacheEntry) -> None:
+        if not cache_key_allowed(tenant_id, model, prompt_hash):
+            return
         self.cache[(tenant_id, model, prompt_hash)] = entry
 
     def insert_invocation(self, record: InvocationRecord) -> None:
@@ -229,6 +234,17 @@ class FileOpsStore:
         self.inner.record_guardrail(event)
         with (self.directory / "guardrails.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(asdict(event)) + "\n")
+
+
+def cache_key_allowed(tenant_id: str, model: str, prompt_hash: str) -> bool:
+    """A blank tenant is not a shared bucket, and none of the parts can carry prose."""
+    if not tenant_id or tenant_id.strip() != tenant_id or len(tenant_id) > 80:
+        return False
+    if any(char in tenant_id or char in model for char in ("|", "\n", "\r", " ")):
+        return False
+    if not model or len(model) > 80:
+        return False
+    return re.fullmatch(r"[0-9a-f]{64}", prompt_hash) is not None
 
 
 def new_cache_key(tenant_id: str, home_region: str, prompt_hash: str) -> str:

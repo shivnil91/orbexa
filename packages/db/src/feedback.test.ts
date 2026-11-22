@@ -28,6 +28,21 @@ test("feedback rejects document text and a training grant", () => {
   );
 });
 
+test("a rubric code cannot carry customer text", () => {
+  assert.throws(
+    () =>
+      validateFeedback({
+        tenantId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        homeRegion: "local",
+        jobId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        kind: "judge_score",
+        rubricCode: "the buyer tender says the width is secret",
+        score: 1,
+      }),
+    /rubric code/,
+  );
+});
+
 test("an approve signal is a reward and not a document", () => {
   const row = validateFeedback({
     tenantId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

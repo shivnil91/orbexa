@@ -21,6 +21,10 @@ _UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+_RESULT_ID = re.compile(
+    r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{1,4})$",
+    re.IGNORECASE,
+)
 _ZERO_VECTOR = "[" + ",".join(["0"] * 1536) + "]"
 
 
@@ -68,18 +72,22 @@ def retrieve_sql(
     cursor = connection.cursor()
     cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
     cursor.execute("SELECT set_config('app.job_id', %s, true)", (job_id,))
+    if _UUID.match(agent_id):
+        cursor.execute("SELECT set_config('app.agent_id', %s, true)", (agent_id,))
     cursor.execute(
         """SELECT chunk_id::text
            FROM app.retrieve_chunks(%s::uuid, %s::uuid, %s::uuid, %s::vector, %s, %s)""",
         (tenant_id, job_id, embedding_model_id, _ZERO_VECTOR, query_text, limit),
     )
     chunks = _ids(cursor.fetchall())
-    cursor.execute(
-        """SELECT memory_item_id::text
-           FROM app.retrieve_memory(%s, %s::uuid, %s::uuid, %s::vector, %s)""",
-        ("creator_expertise", agent_id, embedding_model_id, _ZERO_VECTOR, limit),
-    )
-    memory = _ids(cursor.fetchall())
+    memory: list[str] = []
+    if _UUID.match(agent_id):
+        cursor.execute(
+            """SELECT memory_item_id::text
+               FROM app.retrieve_memory(%s, %s::uuid, %s::uuid, %s::vector, %s)""",
+            ("creator_expertise", agent_id, embedding_model_id, _ZERO_VECTOR, limit),
+        )
+        memory = _ids(cursor.fetchall())
     connection.commit()
     return chunks, memory
 
@@ -103,7 +111,7 @@ def record_retrieval(
             run_id=run_id,
             scope=scope,
             query_hash=query_hash(query_text),
-            result_ids=result_ids,
+            result_ids=[item for item in result_ids if _RESULT_ID.fullmatch(item)],
         )
     )
 
@@ -141,7 +149,7 @@ def retrieve_for_activity(
             active,
             tenant_id=tenant_id,
             job_id=job_id,
-            agent_id=agent_id or tenant_id,
+            agent_id=agent_id,
             embedding_model_id=model_id,
             query_text=query_text,
         )

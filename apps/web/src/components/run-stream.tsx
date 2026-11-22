@@ -8,21 +8,41 @@ export function RunStream({ jobId, initialCursor, initialStatus }: { jobId: stri
   const [status, setStatus] = useState(initialStatus);
 
   useEffect(() => {
-    if (status !== "queued" && status !== "running") {
+    if (initialStatus !== "queued" && initialStatus !== "running") {
       return;
     }
-    const source = new EventSource(`/api/jobs/${jobId}/events`);
-    source.onmessage = (event) => {
-      const job = JSON.parse(event.data) as Pick<JobRecord, "cursor" | "status">;
-      setCursor(job.cursor);
-      setStatus(job.status);
-      if (job.status !== "queued" && job.status !== "running") {
-        source.close();
-        window.location.reload();
+    let stopped = false;
+    const tick = async () => {
+      while (!stopped) {
+        const response = await fetch(`/api/jobs/${jobId}/step`, {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({ locale: "en" }),
+        });
+        if (!response.ok) {
+          return;
+        }
+        const job = (await response.json()) as Pick<JobRecord, "cursor" | "status">;
+        if (stopped) {
+          return;
+        }
+        setCursor(job.cursor);
+        setStatus(job.status);
+        if (job.status !== "queued" && job.status !== "running") {
+          window.location.reload();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
     };
-    return () => source.close();
-  }, [jobId, status]);
+    void tick();
+    return () => {
+      stopped = true;
+    };
+  }, [jobId, initialStatus]);
 
   return <p className="sr-only">{`${status} ${cursor}`}</p>;
 }

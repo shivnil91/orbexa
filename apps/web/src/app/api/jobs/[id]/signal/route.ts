@@ -5,6 +5,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
   const form = await request.formData();
   const locale = String(form.get("locale") ?? "en");
-  await recordExpertSignal(id);
+  try {
+    await recordExpertSignal(id);
+  } catch {
+    return NextResponse.json({ error: "signal" }, { status: 409 });
+  }
   return NextResponse.redirect(new URL(`/${locale}/jobs/${id}/review`, request.url), 303);
 }

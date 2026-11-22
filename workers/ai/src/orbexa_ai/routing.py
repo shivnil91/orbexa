@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,7 @@ from orbexa_ai.ops_store import (
     FileOpsStore,
     InvocationRecord,
     MemoryOpsStore,
+    ModelRoute,
     OpsStore,
     new_cache_key,
 )
@@ -71,6 +73,23 @@ def prompt_hash(task: str, model: str, chunks: list[Chunk]) -> str:
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _model_token(value: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9._:-]{1,80}", value):
+        return value
+    return "rejected"
+
+
+def _safe_route(route: ModelRoute) -> ModelRoute:
+    """Model ids are tokens. Prose in a route is not sent to a provider or a span."""
+    primary = _model_token(route.primary_model)
+    if primary == "rejected":
+        primary = "fixture"
+    fallback = route.fallback_model
+    if fallback is not None and _model_token(fallback) == "rejected":
+        fallback = None
+    return ModelRoute(route.id, route.code, primary, fallback)
 
 
 def estimate_tokens(text: str) -> int:
@@ -134,7 +153,7 @@ def complete_routed(
     ctx = context or (context_from_payload(payload) if payload is not None else RunContext())
     ops = store or (store_for_payload(payload) if payload is not None else MemoryOpsStore())
     chosen = gateway if gateway is not None else gateway_from_env(selected)
-    route = maybe_reroute(ops.load_route(ctx.agent_version_id), selected)
+    route = _safe_route(maybe_reroute(ops.load_route(ctx.agent_version_id), selected))
     prompt_cache = selected.get("ORBEXA_PROVIDER_CONTRACT") == "1"
     findings = screen_chunks(ops, ctx.tenant_id, chunks)
     del findings
@@ -245,8 +264,8 @@ def _record(
             run_id=ctx.run_id,
             route_id=route_id,
             agent_version_id=ctx.agent_version_id,
-            requested_model=requested,
-            served_model=served,
+            requested_model=_model_token(requested),
+            served_model=_model_token(served),
             fallback_used=fallback_used,
             cache_hit=cache_hit,
             input_tokens=input_tokens,

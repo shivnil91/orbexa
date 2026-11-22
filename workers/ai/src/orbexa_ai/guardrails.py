@@ -63,6 +63,12 @@ def assert_output_safe(result: dict[str, object], own_tenant_id: str | None) -> 
         raise OutputRejected("model output tried to close the document fence")
 
 
+def _stored_tool_code(tool_code: str) -> str:
+    if re.fullmatch(r"[a-z_]{1,64}", tool_code):
+        return tool_code
+    return "unknown"
+
+
 def dispatch_tool(
     store: OpsStore,
     *,
@@ -88,7 +94,7 @@ def dispatch_tool(
                 tenant_id=tenant_id,
                 job_id=job_id,
                 run_id=run_id,
-                tool_code=tool_code,
+                tool_code=_stored_tool_code(tool_code),
                 status=status,
                 args_hash=args_hash,
                 result_hash="",
@@ -135,7 +141,7 @@ def dispatch_tool(
             tenant_id=tenant_id,
             job_id=job_id,
             run_id=run_id,
-            tool_code=tool_code,
+            tool_code=_stored_tool_code(tool_code),
             status="succeeded",
             args_hash=args_hash,
             result_hash=result_hash,

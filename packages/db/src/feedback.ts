@@ -36,6 +36,23 @@ export type FeedbackDb = {
 
 const HASH = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REGION = /^[a-z0-9-]{1,32}$/;
+const RUBRIC = /^[a-z0-9_]{1,64}$/;
+const ALLOWED_FIELDS = new Set([
+  "tenantId",
+  "homeRegion",
+  "jobId",
+  "runId",
+  "kind",
+  "reward",
+  "editDistance",
+  "rubricCode",
+  "score",
+  "rating",
+  "chosenHash",
+  "rejectedHash",
+  "preferenceSource",
+]);
 
 const REWARDS: Record<FeedbackKind, number> = {
   buyer_approve: 1,
@@ -50,13 +67,16 @@ const REWARDS: Record<FeedbackKind, number> = {
 
 export function validateFeedback(input: FeedbackInput): FeedbackInput {
   const record = input as FeedbackInput & Record<string, unknown>;
-  for (const banned of ["body", "text", "prompt", "document", "note", "founderAuthorise"]) {
-    if (banned in record && record[banned] != null && record[banned] !== false) {
+  for (const key of Object.keys(record)) {
+    if (!ALLOWED_FIELDS.has(key)) {
       throw new Error("feedback must not include document text or a training grant");
     }
   }
   if (!UUID.test(input.tenantId) || !UUID.test(input.jobId)) {
     throw new Error("feedback tenant and job must be uuids");
+  }
+  if (!REGION.test(input.homeRegion)) {
+    throw new Error("feedback region is invalid");
   }
   if (!FEEDBACK_KINDS.includes(input.kind)) {
     throw new Error("unknown feedback kind");
@@ -74,6 +94,18 @@ export function validateFeedback(input: FeedbackInput): FeedbackInput {
     throw new Error("expert rating must be from 1 to 5");
   }
   if (input.kind === "judge_score" && (input.score == null || !input.rubricCode)) {
+    throw new Error("judge score needs a rubric code");
+  }
+  if (input.rubricCode != null && !RUBRIC.test(input.rubricCode)) {
+    throw new Error("rubric code is not a token");
+  }
+  if (input.editDistance != null && !Number.isInteger(input.editDistance)) {
+    throw new Error("edit distance is required");
+  }
+  if (input.rating != null && !Number.isInteger(input.rating)) {
+    throw new Error("expert rating must be from 1 to 5");
+  }
+  if (input.score != null && (typeof input.score !== "number" || !Number.isFinite(input.score))) {
     throw new Error("judge score needs a rubric code");
   }
   if (input.chosenHash != null && !HASH.test(input.chosenHash)) {

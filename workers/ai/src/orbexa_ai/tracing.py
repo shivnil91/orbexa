@@ -6,6 +6,7 @@ version. Prompt text and document text are dropped before they reach a span.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from time import perf_counter
@@ -24,6 +25,8 @@ ALLOWED_ATTRIBUTES = frozenset(
 
 _records: list[dict[str, Any]] = []
 _installed = False
+_TOKEN = re.compile(r"^[A-Za-z0-9._:-]{1,80}$")
+_SPAN = re.compile(r"^[a-z_]{1,32}$")
 
 
 def recorded_spans() -> list[dict[str, Any]]:
@@ -46,9 +49,16 @@ def filter_attributes(attributes: Mapping[str, object]) -> dict[str, str | int |
             safe[key] = value
         elif isinstance(value, float):
             safe[key] = value
-        elif isinstance(value, str) and len(value) <= 120:
+        elif isinstance(value, str) and _TOKEN.fullmatch(value):
             safe[key] = value
     return safe
+
+
+def public_span_name(name: str) -> str:
+    """Stage names are fixed tokens. Document text is not a span name."""
+    if _SPAN.fullmatch(name):
+        return name
+    return "activity"
 
 
 def _install() -> Any:
@@ -86,7 +96,7 @@ def start_span(name: str, attributes: Mapping[str, object] | None = None) -> Ite
     started = perf_counter()
     safe = filter_attributes(attributes or {})
     tracer = _install()
-    with tracer.start_as_current_span(name) as current:
+    with tracer.start_as_current_span(public_span_name(name)) as current:
         for key, value in safe.items():
             current.set_attribute(key, value)
         try:
