@@ -27,6 +27,10 @@ __pycache__/
 .terraform/
 *.tfstate
 *.tfstate.*
+*.tfvars
+!*.tfvars.example
+tfplan
+*.tfplan
 
 .DS_Store
 *.pem

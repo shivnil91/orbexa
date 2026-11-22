@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
-    "test": "node --experimental-strip-types --test src/lib/format.test.ts src/lib/locale.test.ts src/lib/dashboard.test.ts src/lib/contrast.test.ts src/lib/payments.test.ts src/lib/jobs.test.ts src/lib/metrics-log.test.ts src/lib/health.test.ts src/lib/database-url.test.ts src/lib/live-key.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/format.test.ts src/lib/locale.test.ts src/lib/dashboard.test.ts src/lib/contrast.test.ts src/lib/payments.test.ts src/lib/jobs.test.ts src/lib/metrics-log.test.ts src/lib/health.test.ts src/lib/database-url.test.ts src/lib/live-key.test.ts src/lib/demo-auth.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

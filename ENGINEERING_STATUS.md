@@ -65,3 +65,13 @@ The hospital-bed slice still runs without AWS, Stripe, or a model API. The five 
 
 - Web on port 43123.
 - API on port 43124, with `ORBEXA_ENV` unset, so the demo route is on.
+
+## Dev stack validation
+
+Checked after the Sydney dev stack was added. No AWS API was called. `terraform plan` and `terraform apply` were not run.
+
+| Command | Result |
+| --- | --- |
+| `terraform fmt -check -recursive infra` with Terraform 1.9.8 | Exit 0 |
+| `terraform init -backend=false` and `terraform validate` in `infra/bootstrap`, `infra/modules/cell`, `infra/modules/dev-stack`, `infra/envs/dev`, `infra/envs/staging`, and `infra/envs/prod` | Exit 0. AWS provider v5.100.0 and, where required, TLS provider v4.4.2 |
+| `python3 infra/iam/check_policy.py` | Exit 0. The three deployer policies are each under the 6,144-character managed-policy cap |

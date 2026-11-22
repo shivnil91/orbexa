@@ -1,0 +1,23 @@
+budget_email = "you@example.com"
+
+# AWS Free plan maximum. Set 0 only if an apply still returns FreeTierRestrictionError.
+db_backup_retention_days = 1
+
+# Public IP of the laptop that will call the API, with /32.
+# Leave this empty until you need ingress.
+# ["0.0.0.0/0"] is acceptable only when DEMO_BASIC_AUTH is set. See the runbook.
+api_ingress_cidrs = []
+
+# Stay at 0 until linux/arm64 images exist in ECR.
+task_desired_count = 0
+
+task_cpu              = 256
+task_memory           = 1024
+task_cpu_architecture = "ARM64"
+
+api_image      = "orbexa/placeholder:not-built"
+worker_image   = "orbexa/placeholder:not-built"
+temporal_image = "temporalio/temporal:1.10.1"
+
+# Set to "owner/orbexa" to create the GitHub OIDC role. Empty skips it.
+github_repository = ""

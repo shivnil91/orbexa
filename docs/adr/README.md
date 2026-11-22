@@ -12,5 +12,6 @@
 | [0008](0008-milestone-4.md) | Milestone 4 readiness: local drills, test-mode adapters, second cell |
 | [0009](0009-vertical-packs.md) | Vertical is data. Tender writing is the first pack |
 | [0010](0010-reinforcement-learning.md) | Reward capture, tenant consent, offline eval, bandit flag. No automatic fine-tuning |
+| [0011](0011-dev-environment.md) | Sydney dev cell without NAT, sized for the US$100 credit |
 
 These records are proposed. The founder accepts them by the actions in [first-response.md](../first-response.md).
