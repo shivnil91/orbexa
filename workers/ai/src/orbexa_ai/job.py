@@ -8,6 +8,7 @@ from dataclasses import asdict
 from orbexa_ai.deliverables import render_docx, render_xlsx
 from orbexa_ai.gateway import LlmGateway, gateway_from_env
 from orbexa_ai.ingest import Chunk, chunk_document, scan_upload
+from orbexa_ai.injection import finalize_draft
 from orbexa_ai.workflow import WorkflowState
 
 MEDIA = {
@@ -48,7 +49,7 @@ def run_tender_job(
 
     requirements = workflow.activity("extract", lambda: chosen.complete("extract", chunks))
     matrix = workflow.activity("matrix", lambda: chosen.complete("matrix", chunks))
-    draft = workflow.activity("draft", lambda: chosen.complete("draft", chunks))
+    draft = finalize_draft(workflow.activity("draft", lambda: chosen.complete("draft", chunks)))
 
     def export() -> dict[str, str]:
         paragraphs = draft["paragraphs"]

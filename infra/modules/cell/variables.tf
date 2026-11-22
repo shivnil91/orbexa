@@ -1,3 +1,14 @@
+variable "cell_name" {
+  type        = string
+  default     = ""
+  description = "Resource-name prefix for this cell. Empty uses environment. A second region sets its own name. Tenants are not copied."
+
+  validation {
+    condition     = var.cell_name == "" || can(regex("^[a-z0-9-]+$", var.cell_name))
+    error_message = "cell_name must be empty or a lowercase identifier."
+  }
+}
+
 variable "environment" {
   type = string
   validation {

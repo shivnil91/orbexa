@@ -62,6 +62,51 @@ jobs:
         working-directory: workers/ai
       - run: pip-audit
 
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @orbexa/web build
+      - run: pnpm --filter @orbexa/web exec playwright install --with-deps chromium
+      - name: WCAG 2.2 AA and Core Web Vitals
+        run: pnpm --filter @orbexa/web test:e2e
+
+  images:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the API and worker images
+        run: |
+          docker buildx build --platform linux/amd64 --load -f apps/web/Dockerfile -t orbexa-api:ci .
+          docker buildx build --platform linux/amd64 --load -f workers/ai/Dockerfile -t orbexa-worker:ci workers/ai
+      - name: API container answers GET /health
+        run: |
+          docker run -d --name orbexa-api -p 43124:43124 orbexa-api:ci
+          ok=0
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+            if curl -fsS http://127.0.0.1:43124/health; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          echo
+          if [ "$ok" != 1 ]; then
+            docker logs orbexa-api
+            exit 1
+          fi
+          docker exec orbexa-api node -e "fetch('http://127.0.0.1:'+(process.env.PORT||43124)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      - name: Worker image can import the serve module
+        run: docker run --rm orbexa-worker:ci python -c "import orbexa_ai.serve, orbexa_ai.startup"
+
   terraform:
     runs-on: ubuntu-latest
     steps:
@@ -81,7 +126,7 @@ jobs:
       - name: Validate roots without contacting AWS
         run: |
           set -euo pipefail
-          for dir in infra/bootstrap infra/modules/cell infra/modules/dev-stack infra/envs/dev infra/envs/staging infra/envs/prod; do
+          for dir in infra/bootstrap infra/modules/cell infra/modules/dev-stack infra/envs/dev infra/envs/staging infra/envs/prod infra/envs/prod-eu-central-1; do
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
           done

@@ -1,4 +1,4 @@
-# ADR 0008: Low-cost dev cell in Sydney
+# ADR 0011: Low-cost dev cell in Sydney
 
 - Status: Proposed
 - Date: 2026-11-22

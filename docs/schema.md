@@ -44,6 +44,14 @@ The source of truth is `packages/db/migrations`. This page is the map. Apply wit
 
 `orbexa_app`, `orbexa_worker`, and `orbexa_finance` are `NOLOGIN`. The app can write tenant data under RLS. The worker cannot read provenance, the ledger, or payments. Finance can read ledger rows only when `app.access` is `finance` for its own buyer, or `platform_finance` for the cell.
 
+## Vertical packs
+
+`verticals` is the category. `vertical_revisions` stores the intake JSON Schema, deliverable types, rubric, and workflow. Orders copy `vertical_code` from the listing. Document kinds other than `evidence` and `expert_credential` must be declared by that vertical. Tender writing is the seeded revision, not a check constraint. See ADR 0009.
+
+## Milestone 4
+
+`app.retrieve_chunks` keeps its signature. `app.lexical_scorer` is `ts_rank_cd` or `bm25`. `app.agent_version_metrics` aggregates `run_metrics` and `llm_invocations`. `app.fulfill_privacy_request` exports or deletes one org in this cell. `app.consume_rate_limit` enforces `rate_limit_policies`.
+
 ## Local cell
 
 Migrations do not insert a local region. `migrate --seed-local` inserts `processing_regions('local','active')` and `cell_identity('local','local')`, and only if the host is loopback. The test seeds the same way inside PGlite.

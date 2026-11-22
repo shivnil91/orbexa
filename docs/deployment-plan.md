@@ -24,6 +24,7 @@ Secrets live in Secrets Manager. The worker role names only its own secret. Prod
 
 - `pnpm install --frozen-lockfile`, lint, typecheck, test, `pnpm audit --audit-level=high`
 - Python install, ruff, mypy, pytest, pip-audit
+- The web build, Playwright, the API and worker image builds, and `terraform validate` with `-backend=false`
 
 GitHub is not connected, so this workflow has not run on GitHub. Branch protection cannot be switched on from a file. When the repository is published, require the CI checks, one reviewer, and a protected environment named `prod` with a reviewer who is not the author before any apply.
 
@@ -31,7 +32,7 @@ Actions are pinned to commit SHAs recorded in the workflow file.
 
 ## Backups
 
-RDS automated backups: 1 day in dev, because the Free plan rejects a longer retention, 7 days in staging, 35 in prod, as set in the Terraform. Snapshots stay in the region. Copying them to another region is a residency decision, not a default. S3 versioning is on. A restore drill is a Milestone 4 task. It has not been done.
+RDS automated backups: 1 day in dev, because the Free plan rejects a longer retention, 7 days in staging, 35 in prod, as set in the Terraform. Snapshots stay in the region. Copying them to another region is a residency decision, not a default. S3 versioning is on. Milestone 4 runs a local restore drill against Postgres and a versioned directory and writes the timing in the test result. An RDS point-in-time restore and an S3 `get-object` by version id have not been executed. See `docs/m4-runbooks.md`.
 
 ## Monitoring
 

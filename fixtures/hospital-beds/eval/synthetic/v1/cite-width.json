@@ -1,0 +1,7 @@
+{
+  "code": "cite-width",
+  "fixtureKind": "synthetic",
+  "expectation": "cite_width",
+  "rubric": ["grounded_claim", "missing_evidence"],
+  "task": "Cite a measurement only when the synthetic supplier note already states it."
+}

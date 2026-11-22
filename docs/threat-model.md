@@ -18,7 +18,7 @@ A curious buyer, a malicious bidder, a compromised expert, a compromised worker 
 | Tampering with another tenant's chunk | Composite foreign keys include `tenant_id` | Tested as superuser: the insert fails |
 | Repudiation of a read | `retrieval_events` and `audit_log` are append-only | They do not store the document body |
 | Information disclosure via a forgotten `WHERE` | `FORCE ROW LEVEL SECURITY` on private tables | Superuser and `BYPASSRLS` still see everything. App roles are neither. Tested. |
-| Denial of service | Per-job budget, rate-limit rows, SQS and WAF in the cell | Not load-tested |
+| Denial of service | Per-job budget, rate-limit rows, SQS and WAF in the cell | Budget and rate-limit tests stop a runaway loop. The WAF rule set is the Terraform common rule set. The ALB was not load-tested |
 | Elevation | Platform roles only on a platform org. The trigger rejects them elsewhere | A stolen platform session is still serious |
 
 ## RBAC and resource grants
@@ -27,7 +27,7 @@ Org membership is not access to a buyer's files. An expert reads a job through `
 
 ## Prompt injection
 
-Tender files are hostile input. The graph does not branch on their text. The model has no tool that sends email, fetches a URL, or changes `app.tenant_id`. Outputs that claim support without a citation are rejected by the database. This reduces the blast radius. It does not make the model incapable of being confused. Milestone 4 adds a fixture set of injection documents and checks that no foreign tenant id appears in the draft.
+Tender files are hostile input. The graph does not branch on their text. The model has no tool that sends email, fetches a URL, or changes `app.tenant_id`. Outputs that claim support without a citation are rejected by the database. This reduces the blast radius. It does not make the model incapable of being confused. Milestone 4 adds a fixture set of injection documents and checks that no foreign tenant id appears in the draft. A draft that names another tenant is rejected. That check is not a penetration test and not a certification.
 
 ## Tool sandbox
 

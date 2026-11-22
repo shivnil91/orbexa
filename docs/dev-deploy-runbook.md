@@ -2,7 +2,7 @@
 
 Account `486726633485`, region `ap-southeast-2` (Asia Pacific (Sydney)). This is the only stack to apply. It has not been applied. No AWS API was called to write it. Do not apply `infra/envs/staging` or `infra/envs/prod`. Do not put a live Stripe key, a model key, or an AWS access key in git.
 
-The shape is [ADR 0008](adr/0008-dev-environment.md). CI runs `terraform validate` with `-backend=false` and does not call AWS.
+The shape is [ADR 0011](adr/0011-dev-environment.md). CI runs `terraform validate` with `-backend=false` and does not call AWS.
 
 ## What you are creating
 

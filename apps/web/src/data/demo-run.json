@@ -1,0 +1,84 @@
+{
+  "model": "fixture",
+  "certificationClaimed": false,
+  "stages": [
+    "extract",
+    "matrix",
+    "draft",
+    "ground"
+  ],
+  "requirements": [
+    {
+      "kind": "mandatory",
+      "body": "The bidder must state how many hospital beds it can deliver within 90 days.",
+      "chunk_index": 0
+    },
+    {
+      "kind": "mandatory",
+      "body": "The bidder must attach a regulatory certificate for the bed model.",
+      "chunk_index": 0
+    },
+    {
+      "kind": "evaluation_criterion",
+      "body": "Evaluation will prefer a clear delivery statement over an unsupported one.",
+      "chunk_index": 0
+    }
+  ],
+  "matrix": [
+    {
+      "kind": "mandatory",
+      "body": "The bidder must state how many hospital beds it can deliver within 90 days.",
+      "chunk_index": 0,
+      "missing_evidence": true,
+      "response_status": "not_addressed",
+      "source": "invitation.pdf page 1"
+    },
+    {
+      "kind": "mandatory",
+      "body": "The bidder must attach a regulatory certificate for the bed model.",
+      "chunk_index": 0,
+      "missing_evidence": true,
+      "response_status": "not_addressed",
+      "source": "invitation.pdf page 1"
+    },
+    {
+      "kind": "evaluation_criterion",
+      "body": "Evaluation will prefer a clear delivery statement over an unsupported one.",
+      "chunk_index": 0,
+      "missing_evidence": true,
+      "response_status": "not_addressed",
+      "source": "invitation.pdf page 1"
+    }
+  ],
+  "paragraphs": [
+    "This draft uses only the fictional supplier note and the fictional invitation.",
+    "The supplier note records a bed width of 950 mm.",
+    "The invitation asks for a delivery quantity and a regulatory certificate. Neither is in the supplier note, so this draft does not state them."
+  ],
+  "claims": [
+    {
+      "body": "The supplier note records a bed width of 950 mm.",
+      "support_status": "supported",
+      "chunk_indexes": [
+        11
+      ],
+      "quote": "950 mm",
+      "source": "supplier-note.docx paragraph/2"
+    },
+    {
+      "body": "A regulatory certificate was requested and is not in the supplier note, so no certificate is asserted.",
+      "support_status": "missing_evidence",
+      "chunk_indexes": [],
+      "quote": "",
+      "source": ""
+    },
+    {
+      "body": "A delivery quantity was requested and is not in the supplier note.",
+      "support_status": "missing_evidence",
+      "chunk_indexes": [],
+      "quote": "",
+      "source": ""
+    }
+  ],
+  "status": "waiting_for_expert"
+}
