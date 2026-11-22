@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg16
+    environment:
+      POSTGRES_USER: orbexa
+      POSTGRES_PASSWORD: orbexa_local_only
+      POSTGRES_DB: orbexa
+    ports:
+      - "54329:5432"
+    volumes:
+      - orbexa_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbexa -d orbexa"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  temporal:
+    image: temporalio/temporal:1.10.1
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/tmp/temporal.db"]
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+
+volumes:
+  orbexa_pg:
