@@ -21,6 +21,7 @@ export type UserRecord = {
   passwordSalt: string;
   createdAt: string;
   connect: ConnectState;
+  operator?: boolean;
 };
 
 export type SessionRecord = {

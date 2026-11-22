@@ -114,6 +114,7 @@ test("seller publishes, buyer hires, and admin can hide the listing", async ({ p
   await page.getByLabel("Name").fill("Operator Example");
   await page.getByLabel("Email").fill(adminEmail);
   await page.getByLabel("Password").fill("correct-horse");
+  await page.getByLabel("Operator code").fill("demo-operator-code");
   await page.getByRole("button", { name: "Create account" }).click();
   await page.goto("/en/admin");
   const row = page.locator("li").filter({ hasText: agentName });

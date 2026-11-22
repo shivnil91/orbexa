@@ -1,18 +1,24 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { SESSION_COOKIE, signInAccount } from "@/lib/accounts";
-import { appUrl, redirectTo } from "@/server/http";
+import { echoNext, safeNext, sessionCookie, signInAccount } from "@/lib/accounts";
+import { requestIsSecure } from "@/lib/request-guard";
+import { appUrl, formLocale, redirectTo } from "@/server/http";
 
 export async function POST(request: Request) {
   const form = await request.formData();
-  const locale = String(form.get("locale") ?? "en");
+  const locale = formLocale(form);
   const requested = String(form.get("next") ?? "");
-  const result = await signInAccount(String(form.get("email") ?? ""), String(form.get("password") ?? ""));
+  const result = await signInAccount(
+    String(form.get("email") ?? ""),
+    String(form.get("password") ?? ""),
+    String(form.get("operatorCode") ?? ""),
+  );
   if (!result.ok) {
-    return redirectTo(request, `/${locale}/sign-in`, { error: result.error, next: requested || undefined });
+    return redirectTo(request, `/${locale}/sign-in`, { error: result.error, next: echoNext(requested, locale) });
   }
-  const next = requested.startsWith(`/${locale}/`) && !requested.includes("://") ? requested : `/${locale}/account`;
   const jar = await cookies();
-  jar.set({ name: SESSION_COOKIE, value: result.token, httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 14 });
-  return NextResponse.redirect(appUrl(request, next), 303);
+  jar.set(sessionCookie(result.token, requestIsSecure(request)));
+  const response = NextResponse.redirect(appUrl(request, safeNext(requested, locale)), 303);
+  response.headers.set("cache-control", "no-store");
+  return response;
 }

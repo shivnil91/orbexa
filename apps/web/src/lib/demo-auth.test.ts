@@ -98,12 +98,16 @@ test("GET /health and the Stripe webhook stay open when demo auth is on", () => 
   });
   assert.equal(decide({ method: "POST", pathname: "/api/stripe/webhook/replay", authorization: null }).allow, false);
   assert.equal(decide({ method: "GET", pathname: "/api/jobs", authorization: null }).allow, false);
+  for (const pathname of ["/api/auth/sign-in", "/api/auth/register", "/api/admin/listings", "/api/connect", "/api/reviews", "/en/admin", "/api/jobs"]) {
+    assert.equal(decide({ method: "POST", pathname, authorization: null }).allow, false, pathname);
+  }
 });
 
 test("the proxy runs the check and does not skip health or API routes", () => {
   const source = readFileSync(join(process.cwd(), "src/proxy.ts"), "utf8");
   assert.match(source, /decideDemoAuth/);
   assert.match(source, /readDemoBasicAuth/);
+  assert.match(source, /csrfAllows/);
   assert.doesNotMatch(source, /process\.env\.DEMO_BASIC_AUTH/);
   const matcher = source.slice(source.indexOf("matcher"));
   assert.equal(matcher.includes("health"), false);

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { decideDemoAuth, readDemoBasicAuth } from "@/lib/demo-auth";
 import { isSupportedLocale } from "@/lib/locale";
+import { browserOrigin, csrfAllows } from "@/lib/request-guard";
 
 export function proxy(request: NextRequest) {
   const decision = decideDemoAuth({
@@ -16,6 +17,18 @@ export function proxy(request: NextRequest) {
         "WWW-Authenticate": decision.wwwAuthenticate,
         "Cache-Control": "no-store",
       },
+    });
+  }
+  if (!csrfAllows({
+    method: request.method,
+    pathname: request.nextUrl.pathname,
+    origin: request.headers.get("origin"),
+    referer: request.headers.get("referer"),
+    browserOrigin: browserOrigin(request),
+  })) {
+    return new NextResponse("Cross-site request refused", {
+      status: 403,
+      headers: { "Cache-Control": "no-store" },
     });
   }
 

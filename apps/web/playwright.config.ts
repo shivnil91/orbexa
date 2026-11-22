@@ -14,6 +14,7 @@ export default defineConfig({
       ORBEXA_JOB_DIR: "/tmp/orbexa-e2e/jobs",
       ORBEXA_DEMO_DIR: "/tmp/orbexa-e2e/demo",
       ORBEXA_ADMIN_EMAILS: "admin-desktop@example.test,admin-mobile@example.test",
+      ORBEXA_ADMIN_BOOTSTRAP: "demo-operator-code",
     },
   },
   projects: [

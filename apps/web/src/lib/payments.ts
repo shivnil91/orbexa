@@ -43,8 +43,19 @@ export async function stripeTestTransport(call: {
   url: string;
   headers: Record<string, string>;
   body: string;
+  method?: "GET" | "POST";
 }): Promise<{ status: number; body: string }> {
-  const response = await fetch(call.url, { method: "POST", headers: call.headers, body: call.body });
+  const url = new URL(call.url);
+  if (url.protocol !== "https:" || url.host !== "api.stripe.com") {
+    throw new Error("Stripe test transport refused the host");
+  }
+  const method = call.method ?? "POST";
+  const response = await fetch(url, {
+    method,
+    headers: call.headers,
+    body: method === "GET" ? undefined : call.body,
+    redirect: "error",
+  });
   return { status: response.status, body: await response.text() };
 }
 
@@ -52,6 +63,7 @@ export type StripeTransport = (call: {
   url: string;
   headers: Record<string, string>;
   body: string;
+  method?: "GET" | "POST";
 }) => Promise<{ status: number; body: string }>;
 
 export type VerifiedStripeEvent = {
@@ -152,11 +164,18 @@ function stripeTestEnabled(env: NodeJS.ProcessEnv): string {
   return key;
 }
 
+function connectedAccount(id: string | undefined): string | undefined {
+  if (!id || !/^acct_[A-Za-z0-9]+$/.test(id)) {
+    return undefined;
+  }
+  return id;
+}
+
 export async function sendStripeTestCheckout(
   input: CheckoutInput,
   env: NodeJS.ProcessEnv,
   transport: StripeTransport,
-  urls?: { successUrl?: string; cancelUrl?: string },
+  urls?: { successUrl?: string; cancelUrl?: string; destinationAccountId?: string },
 ): Promise<{ id: string; url?: string }> {
   const key = stripeTestEnabled(env);
   assertOrderAmount(input);
@@ -175,7 +194,18 @@ export async function sendStripeTestCheckout(
     "line_items[0][price_data][product_data][name]": "Orbexa order",
     success_url: browserReturnUrl(urls?.successUrl, "https://example.invalid/return"),
     cancel_url: browserReturnUrl(urls?.cancelUrl, "https://example.invalid/cancel"),
+    "payment_intent_data[metadata][order_id]": input.orderId,
+    "payment_intent_data[metadata][platform_fee_minor]": String(plan.platformFeeMinor),
+    "payment_intent_data[metadata][creator_royalty_minor]": String(plan.creatorRoyaltyMinor),
+    "payment_intent_data[metadata][review_fee_minor]": String(plan.reviewFeeMinor),
+    "payment_intent_data[metadata][tax_minor]": "0",
   });
+  const destination = connectedAccount(urls?.destinationAccountId);
+  const applicationFee = plan.platformFeeMinor + plan.reviewFeeMinor;
+  if (destination && applicationFee > 0 && applicationFee < plan.amountMinor) {
+    body.set("payment_intent_data[transfer_data][destination]", destination);
+    body.set("payment_intent_data[application_fee_amount]", String(applicationFee));
+  }
   const result = await transport({
     url: "https://api.stripe.com/v1/checkout/sessions",
     headers: {
@@ -259,10 +289,9 @@ export function verifyStripeTestWebhook(
   if (!Number.isFinite(stamp) || Math.abs(now - stamp) > 300) {
     throw new Error("webhook timestamp is outside the allowed window");
   }
-  const digest = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
-  const left = Buffer.from(digest);
-  const right = Buffer.from(expected);
-  if (left.length !== right.length || !timingSafeEqual(left, right)) {
+  const digest = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest();
+  const right = Buffer.from(expected, "hex");
+  if (right.length !== digest.length || !timingSafeEqual(digest, right)) {
     throw new Error("webhook signature mismatch");
   }
   const parsed = JSON.parse(body) as {

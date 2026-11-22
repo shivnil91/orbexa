@@ -5,6 +5,7 @@ import { connection } from "next/server";
 import { Notice } from "@/components/notice";
 import { SubmitButton } from "@/components/submit-button";
 import { inputClass, pageClass } from "@/components/styles";
+import { echoNext } from "@/lib/accounts";
 import { messageFor, t } from "@/lib/i18n";
 import { isSupportedLocale } from "@/lib/locale";
 import { currentUser } from "@/server/session";
@@ -22,7 +23,8 @@ export default async function RegisterPage({
   await connection();
   const query = await searchParams;
   if (!isSupportedLocale(locale)) notFound();
-  if (await currentUser()) redirect(`/${locale}/account`);
+  const next = echoNext(query.next, locale);
+  if (await currentUser()) redirect(next ?? `/${locale}/account`);
   const role = query.role === "seller" || query.role === "both" ? query.role : "buyer";
   const error = messageFor(locale, query.error);
   return (
@@ -33,7 +35,7 @@ export default async function RegisterPage({
       {error ? <Notice tone="error">{error}</Notice> : null}
       <form action="/api/auth/register" className="grid gap-4 rounded-2xl border border-line bg-surface p-5" method="post">
         <input name="locale" type="hidden" value={locale} />
-        <input name="next" type="hidden" value={query.next ?? ""} />
+        <input name="next" type="hidden" value={next ?? ""} />
         <label className="grid gap-2 text-sm font-medium" htmlFor="name">
           {t(locale, "auth.name")}
           <input className={inputClass} id="name" name="name" required autoComplete="name" />
@@ -47,6 +49,11 @@ export default async function RegisterPage({
           <input className={inputClass} id="password" name="password" type="password" required minLength={8} autoComplete="new-password" />
         </label>
         <p className="text-sm text-muted">{t(locale, "auth.passwordHint")}</p>
+        <label className="grid gap-2 text-sm font-medium" htmlFor="operatorCode">
+          {t(locale, "auth.operatorCode")}
+          <input className={inputClass} id="operatorCode" name="operatorCode" type="password" autoComplete="off" />
+        </label>
+        <p className="text-sm text-muted">{t(locale, "auth.operatorHint")}</p>
         <fieldset className="grid gap-2">
           <legend className="text-sm font-medium">{t(locale, "auth.role")}</legend>
           {(["buyer", "seller", "both"] as const).map((option) => (
@@ -58,7 +65,7 @@ export default async function RegisterPage({
         </fieldset>
         <SubmitButton label={t(locale, "auth.create")} pendingLabel={t(locale, "pending")} />
       </form>
-      <p className="text-sm">{t(locale, "auth.haveAccount")} <Link className="underline" href={`/${locale}/sign-in${query.next ? `?next=${encodeURIComponent(query.next)}` : ""}`}>{t(locale, "nav.signIn")}</Link></p>
+      <p className="text-sm">{t(locale, "auth.haveAccount")} <Link className="underline" href={`/${locale}/sign-in${next ? `?next=${encodeURIComponent(next)}` : ""}`}>{t(locale, "nav.signIn")}</Link></p>
     </main>
   );
 }

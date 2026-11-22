@@ -140,6 +140,7 @@ test("accepted earnings sum only this seller's accepted orders", () => {
     { sellerId: "seller", listingSlug: "a", status: "accepted", creatorRoyaltyMinor: 3200 },
     { sellerId: "seller", listingSlug: "a", status: "checkout", creatorRoyaltyMinor: 1000 },
     { sellerId: "other", listingSlug: "b", status: "accepted", creatorRoyaltyMinor: 900 },
+    { sellerId: "seller", listingSlug: "a", status: "accepted", creatorRoyaltyMinor: 500, refunded: true },
   ], "seller", ["a"]);
   assert.equal(total, 3200);
 });
@@ -233,5 +234,21 @@ describe("accounts and connect", { concurrency: false }, () => {
     assert.equal(started.mode, "stripe_test");
     assert.equal(started.accountId, "acct_test123");
     assert.equal(started.url, "https://connect.stripe.com/setup/s/test");
+    assert.equal(started.chargesEnabled, false);
+    const before = calls;
+    const phish = await beginConnectOnboarding({
+      user,
+      env: { PAYMENT_PROVIDER: "stripe", STRIPE_TEST_SECRET_KEY: "sk_test_example", STRIPE_TEST_NETWORK: "1" },
+      transport: async () => {
+        calls += 1;
+        return { status: 200, body: "{}" };
+      },
+      returnUrl: "https://evil.example/phish",
+      refreshUrl: "https://evil.example/phish",
+      expectedOrigin: "http://127.0.0.1",
+    });
+    assert.equal(phish.url, null);
+    assert.equal(phish.error, "url");
+    assert.equal(calls, before);
   });
 });

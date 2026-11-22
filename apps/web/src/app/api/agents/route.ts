@@ -1,7 +1,7 @@
 import { canSell } from "@/lib/accounts";
-import { saveAgent, type AgentInput } from "@/lib/marketplace";
+import { isListingSlug, saveAgent, type AgentInput } from "@/lib/marketplace";
 import type { KnowledgeNote } from "@/lib/demo-store";
-import { redirectTo } from "@/server/http";
+import { formLocale, redirectTo } from "@/server/http";
 import { currentUser } from "@/server/session";
 
 async function knowledgeFrom(form: FormData): Promise<{ notes: KnowledgeNote[]; error?: string }> {
@@ -30,8 +30,11 @@ async function knowledgeFrom(form: FormData): Promise<{ notes: KnowledgeNote[]; 
 
 export async function POST(request: Request) {
   const form = await request.formData();
-  const locale = String(form.get("locale") ?? "en");
+  const locale = formLocale(form);
   const slug = String(form.get("slug") ?? "");
+  if (slug && !isListingSlug(slug)) {
+    return redirectTo(request, `/${locale}/sell`, { error: "missing" });
+  }
   const back = slug ? `/${locale}/sell/${slug}` : `/${locale}/sell/new`;
   const user = await currentUser();
   if (!user) {

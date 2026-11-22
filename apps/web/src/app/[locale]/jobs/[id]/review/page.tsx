@@ -1,10 +1,11 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { EvidenceMatrix } from "@/components/evidence-matrix";
 import { Notice } from "@/components/notice";
 import { SubmitButton } from "@/components/submit-button";
 import { inputClass } from "@/components/styles";
 import { messageFor, t } from "@/lib/i18n";
+import { canMutateJob, jobReadDecision, jobStatusKey } from "@/lib/job-access";
 import { readJob } from "@/lib/jobs";
 import { isSupportedLocale } from "@/lib/locale";
 import { getCatalog } from "@/lib/marketplace";
@@ -28,13 +29,21 @@ export default async function ReviewPage({
     notFound();
   }
   const user = await currentUser();
+  const decision = jobReadDecision(job.tenantId, user);
+  if (decision === "sign-in") {
+    redirect(`/${locale}/sign-in?next=/${locale}/jobs/${job.id}/review`);
+  }
+  if (decision === "hide") {
+    notFound();
+  }
+  const allowMutate = canMutateJob(job.tenantId, user);
   const listing = (await getCatalog()).find((item) => item.slug === job.listingSlug);
   const reviewed = listing?.reviews.some((review) => review.jobId === job.id) ?? false;
   const error = messageFor(locale, query.error);
   return (
     <main id="content" className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-8 px-4 py-8 sm:px-8 sm:py-12">
       <header className="max-w-3xl">
-        <p className="text-sm text-muted">{t(locale, `status.${job.status}`)}</p>
+        <p className="text-sm text-muted">{t(locale, jobStatusKey(job.status, job.refunded))}</p>
         <h1 className="mt-2 text-4xl font-semibold tracking-tight">{t(locale, "review.title")}</h1>
         <p className="mt-3 leading-7 text-muted">{t(locale, "review.lede")}</p>
         <p className="mt-2 text-sm">{t(locale, "review.noTraining")}</p>
@@ -61,7 +70,7 @@ export default async function ReviewPage({
           ))}
         </ul>
       </section> : null}
-      {job.status === "waiting_for_expert" ? (
+      {allowMutate && job.status === "waiting_for_expert" ? (
         <form action={`/api/jobs/${job.id}/signal`} method="post" className="rounded-2xl border border-line bg-surface p-5">
           <input type="hidden" name="locale" value={locale} />
           <p className="text-sm leading-6 text-muted">{t(locale, "review.signal")}</p>
@@ -70,7 +79,7 @@ export default async function ReviewPage({
           </button>
         </form>
       ) : null}
-      <section className="grid gap-4 rounded-2xl border border-line p-5">
+      {allowMutate ? <section className="grid gap-4 rounded-2xl border border-line p-5">
         <h2 className="text-lg font-semibold">{t(locale, "review.recorded")}</h2>
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <form action={`/api/jobs/${job.id}/feedback`} method="post">
@@ -130,7 +139,7 @@ export default async function ReviewPage({
             ))}
           </ul>
         ) : null}
-      </section>
+      </section> : null}
       {user && user.id === job.tenantId && !reviewed && (job.status === "accepted" || job.status === "waiting_for_buyer") ? (
         <form action="/api/reviews" className="grid gap-3 rounded-2xl border border-line p-5" method="post">
           <h2 className="text-lg font-semibold">{t(locale, "review.marketplace")}</h2>
@@ -149,7 +158,7 @@ export default async function ReviewPage({
           <SubmitButton label={t(locale, "review.publish")} pendingLabel={t(locale, "pending")} />
         </form>
       ) : null}
-      <form action={`/api/jobs/${job.id}/consent`} method="post" className="rounded-2xl bg-warning-bg p-5 text-warning">
+      {allowMutate ? <form action={`/api/jobs/${job.id}/consent`} method="post" className="rounded-2xl bg-warning-bg p-5 text-warning">
         <input type="hidden" name="locale" value={locale} />
         <label className="flex min-h-11 items-start gap-3 text-sm leading-6" htmlFor="consent">
           <input id="consent" name="granted" type="checkbox" value="yes" defaultChecked={job.trainingConsent} className="mt-1 size-5" />
@@ -159,7 +168,7 @@ export default async function ReviewPage({
         <button className="mt-3 inline-flex min-h-11 items-center rounded-full bg-accent px-4 text-accent-foreground" type="submit">
           {t(locale, "review.consentSave")}
         </button>
-      </form>
+      </form> : null}
     </main>
   );
 }

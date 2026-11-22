@@ -680,6 +680,9 @@ export async function saveAgent(ownerId: string, input: AgentInput, intent: "dra
         return null;
       }
       if (existing) {
+        if (intent === "publish" && db.overrides[existing.slug]) {
+          return "suspended" as const;
+        }
         existing.name = value.name;
         existing.pitch = value.pitch;
         existing.description = value.description;
@@ -692,8 +695,7 @@ export async function saveAgent(ownerId: string, input: AgentInput, intent: "dra
         if (intent === "publish") {
           existing.status = "published";
           existing.publishedAt = existing.publishedAt ?? now;
-          delete db.overrides[existing.slug];
-        } else if (intent === "unpublish") {
+        } else if (intent === "unpublish" && !db.overrides[existing.slug]) {
           existing.status = "draft";
           existing.publishedAt = null;
         }
@@ -720,6 +722,9 @@ export async function saveAgent(ownerId: string, input: AgentInput, intent: "dra
       db.agents.push(created);
       return created.slug;
     });
+    if (saved === "suspended") {
+      return { ok: false, error: "suspended" };
+    }
     if (!saved) {
       return { ok: false, error: "missing" };
     }
@@ -730,6 +735,9 @@ export async function saveAgent(ownerId: string, input: AgentInput, intent: "dra
 }
 
 export async function moderateListing(slug: string, action: "suspend" | "restore" | "reject"): Promise<boolean> {
+  if (!isListingSlug(slug)) {
+    return false;
+  }
   const known = slug === "hospital-beds" || EXAMPLES.some((agent) => agent.slug === slug);
   return updateDb((db) => {
     const agent = db.agents.find((item) => item.slug === slug);
@@ -805,8 +813,14 @@ export async function searchesFor(ownerId: string) {
   return db.searches.filter((item) => item.ownerId === ownerId).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-export function acceptedEarnings(jobs: { sellerId?: string; listingSlug: string; status: string; creatorRoyaltyMinor: number }[], sellerId: string, slugs: string[]): number {
+const LISTING_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function isListingSlug(slug: string): boolean {
+  return slug.length > 0 && slug.length <= 80 && LISTING_SLUG.test(slug);
+}
+
+export function acceptedEarnings(jobs: { sellerId?: string; listingSlug: string; status: string; creatorRoyaltyMinor: number; refunded?: boolean }[], sellerId: string, slugs: string[]): number {
   return jobs
-    .filter((job) => job.status === "accepted" && (job.sellerId === sellerId || slugs.includes(job.listingSlug)))
+    .filter((job) => job.status === "accepted" && job.refunded !== true && (job.sellerId === sellerId || slugs.includes(job.listingSlug)))
     .reduce((sum, job) => sum + job.creatorRoyaltyMinor, 0);
 }

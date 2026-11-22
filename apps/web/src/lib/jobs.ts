@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
+import { readDb } from "./demo-store.ts";
 import { publishedListing, sandboxReply } from "./marketplace.ts";
 import { validateFeedback, type FeedbackInput, type FeedbackKind } from "@orbexa/db/feedback.ts";
 import { validateIntake } from "./intake.ts";
@@ -70,6 +71,7 @@ export type JobRecord = {
   finishedAt: number | null;
   metricsWritten: boolean;
   processedStripeEvents: string[];
+  refunded?: boolean;
   instructions?: string;
   sellerId?: string;
   createdAt?: number;
@@ -172,7 +174,7 @@ export async function createJob(input: {
         ]
       : [],
     feedback: [],
-    trainingConsent: await readConsent(tenantId),
+    trainingConsent: tenantId === DEMO_ORG_ID ? false : await readConsent(tenantId),
     approvalSignal: null,
     startedAt: null,
     finishedAt: null,
@@ -218,6 +220,9 @@ export async function payJob(
     if (job.status !== "checkout") {
       return job;
     }
+    if (job.refunded) {
+      throw new Error("job is refunded");
+    }
     const input = snapshotInput(job);
     const plan = checkoutPlan(input);
     if (!stripeTestNetworkEnabled(process.env)) {
@@ -229,7 +234,10 @@ export async function payJob(
     if (job.payment?.id.startsWith("cs_test_")) {
       return job;
     }
-    const session = await sendStripeTestCheckout(input, process.env, transport, urls);
+    const session = await sendStripeTestCheckout(input, process.env, transport, {
+      ...urls,
+      destinationAccountId: await sellerDestination(job.sellerId),
+    });
     job.payment = { ...plan, mode: "stripe_test", simulated: true, id: session.id };
     if (session.url) {
       job.stripeCheckoutUrl = session.url;
@@ -262,6 +270,13 @@ export async function applyVerifiedStripePayment(event: VerifiedStripeEvent): Pr
     ) {
       throw new Error("amount does not match the order snapshot");
     }
+    if (job.refunded) {
+      if (!seen.includes(event.id)) {
+        job.processedStripeEvents = [...seen, event.id];
+        await writeJob(job);
+      }
+      return job;
+    }
     if (job.status !== "checkout") {
       if (job.payment) {
         return job;
@@ -278,11 +293,60 @@ export async function applyVerifiedStripePayment(event: VerifiedStripeEvent): Pr
   });
 }
 
+export async function applyVerifiedStripeRefund(event: VerifiedStripeEvent): Promise<JobRecord> {
+  if (event.type !== "refund.succeeded" || event.livemode !== false) {
+    throw new Error("event is not a test refund");
+  }
+  if (!Number.isSafeInteger(event.amountMinor) || event.amountMinor <= 0) {
+    throw new Error("refund amount is invalid");
+  }
+  return withLock(event.orderId, async () => {
+    const job = await readJob(event.orderId);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    if (event.currency !== job.currency || event.amountMinor > job.priceMinor) {
+      throw new Error("amount does not match the order snapshot");
+    }
+    const seen = job.processedStripeEvents ?? [];
+    if (seen.includes(event.id)) {
+      return job;
+    }
+    job.refunded = true;
+    job.processedStripeEvents = [...seen, event.id];
+    if (job.status !== "rejected") {
+      job.status = "rejected";
+    }
+    await writeJob(job);
+    return job;
+  });
+}
+
+async function sellerDestination(sellerId: string | undefined): Promise<string | undefined> {
+  if (!sellerId) {
+    return undefined;
+  }
+  try {
+    const db = await readDb();
+    const seller = db.users.find((user) => user.id === sellerId);
+    const accountId = seller?.connect.accountId;
+    if (!seller?.connect.chargesEnabled || !accountId || !/^acct_[A-Za-z0-9]+$/.test(accountId)) {
+      return undefined;
+    }
+    return accountId;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function revealNext(id: string): Promise<JobRecord> {
   return withLock(id, async () => {
     const job = await readJob(id);
     if (!job) {
       throw new Error("job not found");
+    }
+    if (job.refunded || job.status === "rejected" || job.status === "checkout" || !job.payment) {
+      return job;
     }
     if (job.status !== "queued" && job.status !== "running") {
       return job;
@@ -317,6 +381,9 @@ export async function recordJobFeedback(
     const job = await readJob(id);
     if (!job) {
       throw new Error("job not found");
+    }
+    if (job.refunded) {
+      throw new Error("job is refunded");
     }
     const buyerSignal = input.kind === "buyer_approve"
       || input.kind === "buyer_edit"
@@ -372,7 +439,7 @@ export async function recordExpertSignal(id: string): Promise<JobRecord> {
     if (!job) {
       throw new Error("job not found");
     }
-    if (job.serviceLevel === "autonomous") {
+    if (job.refunded || job.serviceLevel === "autonomous") {
       return job;
     }
     if (job.status !== "waiting_for_expert") {
@@ -392,7 +459,9 @@ export async function setJobConsent(id: string, granted: boolean): Promise<JobRe
       throw new Error("job not found");
     }
     job.trainingConsent = granted;
-    await writeConsent(job.tenantId, granted);
+    if (job.tenantId !== DEMO_ORG_ID) {
+      await writeConsent(job.tenantId, granted);
+    }
     await writeJob(job);
     return job;
   });

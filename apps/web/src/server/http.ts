@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
+import { isSupportedLocale } from "@/lib/locale";
+import { browserOrigin, sameOriginUrl } from "@/lib/request-guard";
+
+export function formLocale(form: FormData): string {
+  const locale = String(form.get("locale") ?? "en");
+  return isSupportedLocale(locale) ? locale : "en";
+}
 
 export function appUrl(request: Request, path: string): URL {
-  const current = new URL(request.url);
-  const headerHost = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  const host = headerHost && /^[A-Za-z0-9.\-:]+$/.test(headerHost) ? headerHost : current.host;
-  const proto = request.headers.get("x-forwarded-proto") ?? current.protocol.replace(":", "");
-  return new URL(path, `${proto}://${host}/`);
+  const origin = browserOrigin(request) ?? new URL(request.url).origin;
+  return sameOriginUrl(origin, path);
 }
 
 export function redirectTo(request: Request, path: string, params?: Record<string, string | undefined>): NextResponse {

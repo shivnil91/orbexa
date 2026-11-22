@@ -1,9 +1,15 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import type { ConnectState, Role, UserRecord } from "./demo-store.ts";
 import { emptyConnect, readDb, updateDb } from "./demo-store.ts";
+import { isSupportedLocale } from "./locale.ts";
 
 export const SESSION_COOKIE = "orbexa_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 14;
+const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 } as const;
+const SIGN_IN_LIMIT = 8;
+const SIGN_IN_WINDOW_MS = 15 * 60 * 1000;
+
+const failures = new Map<string, { count: number; resetAt: number }>();
 
 const DUMMY = hashPassword("not-a-real-password");
 
@@ -20,29 +26,49 @@ export type PublicUser = {
 export type AuthResult = { ok: true; token: string; user: PublicUser } | { ok: false; error: string };
 
 export function hashPassword(password: string, salt = randomBytes(16).toString("hex")): { hash: string; salt: string } {
-  const hash = scryptSync(password, salt, 32).toString("hex");
+  const hash = scryptSync(password, salt, 32, SCRYPT).toString("hex");
   return { hash, salt };
 }
 
 export function verifyPassword(password: string, salt: string, expected: string): boolean {
-  const actual = scryptSync(password, salt, 32);
-  const stored = Buffer.from(expected, "hex");
-  if (actual.length !== stored.length) {
-    return false;
-  }
-  return timingSafeEqual(actual, stored);
+  const actual = scryptSync(password, salt, 32, SCRYPT);
+  const validHex = /^[0-9a-f]{64}$/i.test(expected);
+  const stored = validHex ? Buffer.from(expected, "hex") : Buffer.alloc(32);
+  const matches = stored.length === actual.length && timingSafeEqual(actual, stored);
+  return validHex && matches;
 }
 
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export function sessionSetCookie(token: string): string {
-  return `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_SECONDS}`;
+export function sessionCookie(token: string, secure: boolean, maxAge = SESSION_SECONDS) {
+  return {
+    name: SESSION_COOKIE,
+    value: token,
+    httpOnly: true as const,
+    sameSite: "lax" as const,
+    path: "/",
+    secure,
+    maxAge,
+  };
 }
 
-export function sessionClearCookie(): string {
-  return `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
+export function sessionSetCookie(token: string, secure = false): string {
+  const secureFlag = secure ? "; Secure" : "";
+  return `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_SECONDS}${secureFlag}`;
+}
+
+export function sessionClearCookie(secure = false): string {
+  const secureFlag = secure ? "; Secure" : "";
+  return `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureFlag}`;
+}
+
+export function operatorCodeMatches(provided: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const expected = env.ORBEXA_ADMIN_BOOTSTRAP ?? "";
+  const left = createHash("sha256").update(provided).digest();
+  const right = createHash("sha256").update(expected).digest();
+  return expected.length >= 16 && provided.length > 0 && timingSafeEqual(left, right);
 }
 
 export function isAdminEmail(email: string, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -64,16 +90,36 @@ export function toPublic(user: UserRecord, env: NodeJS.ProcessEnv = process.env)
     name: user.name,
     bio: user.bio,
     role: user.role,
-    admin: isAdminEmail(user.email, env),
+    admin: user.operator === true && isAdminEmail(user.email, env),
     connect: user.connect ?? emptyConnect(),
   };
 }
 
 export function safeNext(value: string | null | undefined, locale: string): string {
-  if (!value || !value.startsWith(`/${locale}/`) || value.startsWith("//") || value.includes("\\") || value.includes("://")) {
-    return `/${locale}/account`;
+  const home = isSupportedLocale(locale) ? `/${locale}/account` : "/en/account";
+  if (!value || !isSupportedLocale(locale)) {
+    return home;
   }
-  return value;
+  if (value.length > 300 || /[\u0000-\u001f\u007f\\]/.test(value)) {
+    return home;
+  }
+  try {
+    const url = new URL(value, "http://orbexa.local");
+    if (url.origin !== "http://orbexa.local" || !url.pathname.startsWith(`/${locale}/`) || url.pathname.includes("//")) {
+      return home;
+    }
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return home;
+  }
+}
+
+export function echoNext(value: string | null | undefined, locale: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const safe = safeNext(value, locale);
+  return safe === value ? value : undefined;
 }
 
 function validEmail(email: string): boolean {
@@ -84,7 +130,28 @@ function validRole(role: string): role is Role {
   return role === "buyer" || role === "seller" || role === "both";
 }
 
-export async function registerAccount(input: { name: string; email: string; password: string; role: string }): Promise<AuthResult> {
+function signInLimited(email: string): boolean {
+  const row = failures.get(email);
+  if (!row || row.resetAt <= Date.now()) {
+    return false;
+  }
+  return row.count >= SIGN_IN_LIMIT;
+}
+
+function markSignInFailure(email: string): void {
+  const now = Date.now();
+  const row = failures.get(email);
+  if (!row || row.resetAt <= now) {
+    failures.set(email, { count: 1, resetAt: now + SIGN_IN_WINDOW_MS });
+    return;
+  }
+  row.count += 1;
+}
+
+export async function registerAccount(
+  input: { name: string; email: string; password: string; role: string; operatorCode?: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AuthResult> {
   const name = input.name.trim();
   const email = input.email.trim().toLowerCase();
   const password = input.password;
@@ -102,6 +169,11 @@ export async function registerAccount(input: { name: string; email: string; pass
     return { ok: false, error: "role" };
   }
   const passwordRecord = hashPassword(password);
+  const reserved = isAdminEmail(email, env);
+  const operator = reserved && operatorCodeMatches(input.operatorCode ?? "", env);
+  if (reserved && !operator) {
+    return { ok: false, error: "operator" };
+  }
   const now = new Date().toISOString();
   const token = randomBytes(32).toString("hex");
   try {
@@ -119,6 +191,7 @@ export async function registerAccount(input: { name: string; email: string; pass
         passwordSalt: passwordRecord.salt,
         createdAt: now,
         connect: emptyConnect(),
+        operator,
       };
       db.users.push(created);
       db.sessions.push({
@@ -131,27 +204,45 @@ export async function registerAccount(input: { name: string; email: string; pass
     if (!user) {
       return { ok: false, error: "taken" };
     }
-    return { ok: true, token, user: toPublic(user) };
+    return { ok: true, token, user: toPublic(user, env) };
   } catch {
     return { ok: false, error: "store" };
   }
 }
 
-export async function signInAccount(emailRaw: string, password: string): Promise<AuthResult> {
+export async function signInAccount(
+  emailRaw: string,
+  password: string,
+  operatorCode = "",
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AuthResult> {
   const email = emailRaw.trim().toLowerCase();
+  if (password.length < 1 || password.length > 200) {
+    return { ok: false, error: "credentials" };
+  }
   const db = await readDb();
   const user = db.users.find((item) => item.email === email);
   const match = user ? verifyPassword(password, user.passwordSalt, user.passwordHash) : verifyPassword(password, DUMMY.salt, DUMMY.hash);
-  if (!user || !match) {
+  if (!user || !match || signInLimited(email)) {
+    if (!user || !match) {
+      markSignInFailure(email);
+    }
     return { ok: false, error: "credentials" };
   }
+  failures.delete(email);
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + SESSION_SECONDS * 1000).toISOString();
+  const grantOperator = operatorCodeMatches(operatorCode, env) && isAdminEmail(user.email, env);
   await updateDb((current) => {
+    const row = current.users.find((item) => item.id === user.id);
+    if (row && grantOperator) {
+      row.operator = true;
+      user.operator = true;
+    }
     current.sessions = current.sessions.filter((session) => session.expiresAt > new Date().toISOString() && session.userId !== user.id);
     current.sessions.push({ tokenHash: hashToken(token), userId: user.id, expiresAt });
   });
-  return { ok: true, token, user: toPublic(user) };
+  return { ok: true, token, user: toPublic(user, env) };
 }
 
 export async function userFromToken(token: string | undefined | null): Promise<PublicUser | null> {

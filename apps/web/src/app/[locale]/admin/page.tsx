@@ -5,6 +5,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { pageClass } from "@/components/styles";
 import { formatMoney } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { jobStatusKey, orderSummary } from "@/lib/job-access";
 import { listJobs } from "@/lib/jobs";
 import { isSupportedLocale } from "@/lib/locale";
 import { loadCatalog } from "@/server/catalog";
@@ -26,7 +27,7 @@ export default async function AdminPage({ params }: { params: Promise<{ locale: 
     );
   }
   const items = await loadCatalog();
-  const orders = (await listJobs()).slice(0, 40);
+  const orders = (await listJobs()).slice(0, 40).map(orderSummary);
   return (
     <main id="content" className={pageClass}>
       <header>
@@ -56,7 +57,7 @@ export default async function AdminPage({ params }: { params: Promise<{ locale: 
         {orders.length === 0 ? <p className="mt-3 text-sm text-muted">{t(locale, "orders.empty")}</p> : (
           <ul className="mt-3 grid gap-2 text-sm">
             {orders.map((job) => (
-              <li key={job.id}>{job.title} · {t(locale, `status.${job.status}`)} · {formatMoney(BigInt(job.priceMinor), job.currency, locale)}</li>
+              <li key={job.id}>{job.title} · {t(locale, jobStatusKey(job.status, job.refunded))} · {formatMoney(BigInt(job.priceMinor), job.currency, locale)}</li>
             ))}
           </ul>
         )}

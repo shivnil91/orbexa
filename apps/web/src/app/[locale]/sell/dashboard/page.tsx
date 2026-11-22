@@ -5,12 +5,15 @@ import { connection } from "next/server";
 import { Notice } from "@/components/notice";
 import { SubmitButton } from "@/components/submit-button";
 import { pageClass } from "@/components/styles";
-import { canSell } from "@/lib/accounts";
+import { canSell, updateConnect } from "@/lib/accounts";
+import { syncConnectAccount } from "@/lib/connect";
 import { formatMoney } from "@/lib/format";
 import { messageFor, t } from "@/lib/i18n";
+import { jobStatusKey, orderSummary, sellerOrders } from "@/lib/job-access";
 import { listJobs } from "@/lib/jobs";
 import { isSupportedLocale } from "@/lib/locale";
 import { acceptedEarnings } from "@/lib/marketplace";
+import { stripeTestNetworkEnabled, stripeTestTransport } from "@/lib/payments";
 import { loadCatalog } from "@/server/catalog";
 import { currentUser } from "@/server/session";
 
@@ -32,9 +35,26 @@ export default async function SellerDashboardPage({
   if (!canSell(user.role)) redirect(`/${locale}/sell`);
   const mine = (await loadCatalog()).filter((item) => item.ownerId === user.id);
   const slugs = mine.map((item) => item.slug);
-  const orders = (await listJobs()).filter((job) => job.sellerId === user.id || slugs.includes(job.listingSlug));
-  const earnings = acceptedEarnings(orders, user.id, slugs);
-  const error = messageFor(locale, query.error);
+  const sellerJobs = sellerOrders(await listJobs(), user.id, slugs);
+  const orders = sellerJobs.map(orderSummary);
+  const earnings = acceptedEarnings(sellerJobs, user.id, slugs);
+  let connect = user.connect;
+  let connectError: string | undefined;
+  try {
+    if (stripeTestNetworkEnabled() || user.connect.accountId) {
+      const synced = await syncConnectAccount({ user, transport: stripeTestTransport });
+      if (synced.chargesEnabled !== connect.chargesEnabled || synced.detailsSubmitted !== connect.detailsSubmitted || synced.mode !== connect.mode) {
+        await updateConnect(user.id, synced);
+      }
+      connect = synced;
+    }
+  } catch (error) {
+    connect = { ...user.connect, chargesEnabled: false, detailsSubmitted: false };
+    if (error instanceof Error && /live Stripe/.test(error.message)) {
+      connectError = "live";
+    }
+  }
+  const error = messageFor(locale, query.error ?? connectError);
   return (
     <main id="content" className={pageClass}>
       <header>
@@ -49,8 +69,8 @@ export default async function SellerDashboardPage({
       </section>
       <section className="rounded-2xl border border-line p-5">
         <h2 className="text-lg font-semibold">{t(locale, "seller.connectTitle")}</h2>
-        <p className="mt-2 text-sm leading-6 text-muted">{user.connect.accountId ? t(locale, "seller.connectReady") : t(locale, "seller.connectOff")}</p>
-        {user.connect.accountId ? <p className="mt-2 text-sm">Account {user.connect.accountId}</p> : null}
+        <p className="mt-2 text-sm leading-6 text-muted">{connect.chargesEnabled ? t(locale, "seller.connectEnabled") : connect.accountId ? t(locale, "seller.connectPending") : t(locale, "seller.connectOff")}</p>
+        {connect.accountId ? <p className="mt-2 text-sm">Account {connect.accountId}</p> : null}
         <form action="/api/connect" className="mt-4" method="post">
           <input name="locale" type="hidden" value={locale} />
           <SubmitButton label={t(locale, "seller.connectStart")} pendingLabel={t(locale, "pending")} />
@@ -73,7 +93,7 @@ export default async function SellerDashboardPage({
             {orders.map((job) => (
               <li key={job.id} className="rounded-2xl border border-line p-4 text-sm">
                 <p className="font-medium">{job.title}</p>
-                <p className="mt-1 text-muted">{t(locale, `status.${job.status}`)} · {formatMoney(BigInt(job.priceMinor), job.currency, locale)}</p>
+                <p className="mt-1 text-muted">{t(locale, jobStatusKey(job.status, job.refunded))} · {formatMoney(BigInt(job.priceMinor), job.currency, locale)}</p>
               </li>
             ))}
           </ul>

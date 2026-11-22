@@ -1,12 +1,14 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { EvidenceMatrix } from "@/components/evidence-matrix";
 import { Notice } from "@/components/notice";
 import { RunStream } from "@/components/run-stream";
 import { messageFor, t } from "@/lib/i18n";
+import { canMutateJob, jobReadDecision, jobStatusKey } from "@/lib/job-access";
 import { isSupportedLocale } from "@/lib/locale";
 import { readJob } from "@/lib/jobs";
+import { currentUser } from "@/server/session";
 
 export default async function RunPage({
   params,
@@ -25,6 +27,15 @@ export default async function RunPage({
   if (!job) {
     notFound();
   }
+  const user = await currentUser();
+  const decision = jobReadDecision(job.tenantId, user);
+  if (decision === "sign-in") {
+    redirect(`/${locale}/sign-in?next=/${locale}/jobs/${job.id}`);
+  }
+  if (decision === "hide") {
+    notFound();
+  }
+  const allowMutate = canMutateJob(job.tenantId, user);
   const error = messageFor(locale, query.error);
   const transcript = job.transcript;
   const matrixReady = job.cursor >= 2 && transcript;
@@ -32,7 +43,7 @@ export default async function RunPage({
   return (
     <main id="content" className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-6 px-4 py-8 sm:px-8 sm:py-12">
       <header>
-        <p className="text-sm text-muted">{t(locale, `status.${job.status}`)}</p>
+        <p className="text-sm text-muted">{t(locale, jobStatusKey(job.status, job.refunded))}</p>
         <h1 className="mt-2 text-4xl font-semibold tracking-tight">{t(locale, "run.title")}</h1>
         <p className="mt-3 max-w-3xl leading-7 text-muted">{job.transcript ? t(locale, "run.lede") : t(locale, "run.ledeGeneric")}</p>
       </header>
@@ -56,7 +67,7 @@ export default async function RunPage({
           );
         })}
       </ol>
-      {(job.status === "queued" || job.status === "running") && (
+      {allowMutate && (job.status === "queued" || job.status === "running") && (
         <form action={`/api/jobs/${job.id}/step`} method="post">
           <input type="hidden" name="locale" value={locale} />
           <button className="inline-flex min-h-11 items-center rounded-full border border-line px-4" type="submit">

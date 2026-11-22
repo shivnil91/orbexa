@@ -1,10 +1,10 @@
 import { moderateListing } from "@/lib/marketplace";
-import { redirectTo } from "@/server/http";
+import { formLocale, redirectTo } from "@/server/http";
 import { currentUser } from "@/server/session";
 
 export async function POST(request: Request) {
   const form = await request.formData();
-  const locale = String(form.get("locale") ?? "en");
+  const locale = formLocale(form);
   const user = await currentUser();
   if (!user?.admin) {
     return redirectTo(request, `/${locale}/admin`, { error: "forbidden" });
