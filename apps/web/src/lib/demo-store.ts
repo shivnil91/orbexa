@@ -2,6 +2,9 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import type { AgentPackage } from "./package.ts";
+import type { StudioRecord } from "./studio-types.ts";
+
 export type Role = "buyer" | "seller" | "both";
 
 export type ConnectState = {
@@ -111,6 +114,8 @@ export type ProofRecord = {
   costMinor: number;
   capped: boolean;
   error?: string;
+  /** Hash of the seller material this proof was queued against. */
+  sourceHash?: string;
 };
 
 export type AgentRecord = {
@@ -137,6 +142,8 @@ export type AgentRecord = {
   createdAt: string;
   updatedAt: string;
   publishedAt: string | null;
+  studio?: StudioRecord;
+  packages?: AgentPackage[];
 };
 
 export type ReviewRecord = {
@@ -167,6 +174,31 @@ export type AuditEvent = {
   detail: string;
 };
 
+export type ClientWorkspaceRecord = {
+  clientId: string;
+  sellerId: string;
+  answers: Record<string, string>;
+  docs: { id: string; name: string; text: string }[];
+  memory: { at: string; summary: string }[];
+};
+
+export type StoredStudioRun = {
+  id: string;
+  slug: string;
+  sellerId: string;
+  buyerId: string;
+  clientId: string;
+  tier: string;
+  priceMinor: number;
+  answers: Record<string, string>;
+  csv: string;
+  report: unknown;
+  brokerRequested: boolean;
+  shareToken: string;
+  createdAt: string;
+  exampleData: boolean;
+};
+
 export type MarketplaceDb = {
   users: UserRecord[];
   sessions: SessionRecord[];
@@ -175,6 +207,10 @@ export type MarketplaceDb = {
   searches: SearchRecord[];
   overrides: Record<string, "suspended" | "rejected">;
   audit?: AuditEvent[];
+  clients?: ClientWorkspaceRecord[];
+  studioRuns?: StoredStudioRun[];
+  exampleProofs?: Record<string, ProofRecord>;
+  exampleProofRuns?: string[];
 };
 
 export function emptyConnect(): ConnectState {
@@ -182,7 +218,7 @@ export function emptyConnect(): ConnectState {
 }
 
 export function emptyDb(): MarketplaceDb {
-  return { users: [], sessions: [], agents: [], reviews: [], searches: [], overrides: {}, audit: [] };
+  return { users: [], sessions: [], agents: [], reviews: [], searches: [], overrides: {}, audit: [], clients: [], studioRuns: [], exampleProofs: {}, exampleProofRuns: [] };
 }
 
 export function marketplaceDir(): string {
@@ -207,6 +243,10 @@ function normalize(value: unknown): MarketplaceDb {
     searches: Array.isArray(record.searches) ? record.searches : [],
     overrides: record.overrides && typeof record.overrides === "object" && !Array.isArray(record.overrides) ? record.overrides : {},
     audit: Array.isArray(record.audit) ? record.audit : [],
+    clients: Array.isArray(record.clients) ? record.clients : [],
+    studioRuns: Array.isArray(record.studioRuns) ? record.studioRuns : [],
+    exampleProofs: record.exampleProofs && typeof record.exampleProofs === "object" ? record.exampleProofs : {},
+    exampleProofRuns: Array.isArray(record.exampleProofRuns) ? record.exampleProofRuns : [],
   };
 }
 

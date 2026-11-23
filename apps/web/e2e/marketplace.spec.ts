@@ -28,9 +28,9 @@ test("seller publishes, buyer hires, and admin can hide the listing", async ({ p
   const skill = `Load checker ${stamp} flags missing bridge load cases`;
 
   await page.goto("/en");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Expert know-how, packaged as AI you can trust.");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Build the AI twin of your expertise. Prove it beats plain AI. Deploy it everywhere.");
   await expect(page.getByRole("heading", { name: "Why not just ask ChatGPT?" })).toBeVisible();
-  await expect(page.getByText("Get expert work done by AI agents built by real experts, from $15, in minutes.")).toBeVisible();
+  await expect(page.getByText("The marketplace is one channel.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Get something done" }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Earn from your skills" }).first()).toBeVisible();
   await noOverflow(page);

@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: { default: "Orbexa", template: "%s · Orbexa" },
-  description: "Expert know-how, packaged as AI you can trust. Get expert work done by AI agents built by real experts, from $15, in minutes. Example listings are marked. No certification is claimed.",
+  description: "Build the AI twin of your expertise. Prove it beats plain AI. Deploy it everywhere. Example listings are marked. No certification is claimed.",
 };
 
 export const instant = false;

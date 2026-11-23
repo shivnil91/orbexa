@@ -46,10 +46,10 @@ async function expectClear(page: Page, heading: string) {
 
 async function hire(page: Page, file: string, need: string, title: string, price: string, deliverable: string) {
   const steps: string[] = [];
-  const home = "Expert know-how, packaged as AI you can trust.";
+  const home = "Build the AI twin of your expertise. Prove it beats plain AI. Deploy it everywhere.";
   await page.goto("/en");
   await expect(screen(page, home).getByRole("heading", { level: 1 })).toHaveText(home);
-  await expect(screen(page, home).getByText("Turn what you know into an agent that earns while you sleep.")).toBeVisible();
+  await expect(screen(page, home).getByText("On a large or complex deal the twin stops and hands the work to you.")).toBeVisible();
   await expectClear(page, home);
   await page.screenshot({ path: `/opt/cursor/artifacts/persona-${file}-home.png`, fullPage: false });
   await screen(page, home).getByRole("link", { name: "Get something done", exact: true }).click();
@@ -82,10 +82,10 @@ async function hire(page: Page, file: string, need: string, title: string, price
 async function publish(page: Page, file: string, skill: string, price: string) {
   const steps: string[] = [];
   const email = `${file}-${Date.now()}@example.test`;
-  const home = "Expert know-how, packaged as AI you can trust.";
+  const home = "Build the AI twin of your expertise. Prove it beats plain AI. Deploy it everywhere.";
   await page.goto("/en");
   await expect(screen(page, home).getByRole("heading", { level: 1 })).toHaveText(home);
-  await expect(screen(page, home).getByText("Turn what you know into an agent that earns while you sleep.")).toBeVisible();
+  await expect(screen(page, home).getByText("On a large or complex deal the twin stops and hands the work to you.")).toBeVisible();
   await expectClear(page, home);
   await screen(page, home).getByRole("link", { name: "Earn from your skills", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "What are you great at?" })).toBeVisible();

@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { parseAmountToMinor } from "@orbexa/db/money.ts";
 import type { Listing, Tier } from "./catalog.ts";
 import { listingBySlug } from "./catalog.ts";
+import { NDIS_EXAMPLE_NAME, NDIS_EXAMPLE_PITCH, NDIS_EXAMPLE_SLUG } from "./studio-ndis.ts";
 import type { AgentRecord, AssetKind, ExpertReviewConfig, InterviewAnswer, KnowledgeAsset, KnowledgeNote, MarketplaceDb, ProofRecord, ReviewRecord } from "./demo-store.ts";
 import { emptyDb, readDb, updateDb } from "./demo-store.ts";
 import {
@@ -101,6 +102,8 @@ export type CatalogItem = {
   credentials: PublicCredential[];
   initials: string;
   photoDataUrl: string;
+  hasStudio?: boolean;
+  examplePanel?: boolean;
 };
 
 type ExampleAgent = {
@@ -363,6 +366,21 @@ const EXAMPLES: ExampleAgent[] = [
     reviews: [{ rating: 4, body: "Example review. A new opener could follow it.", createdAt: "2026-05-10T00:00:00.000Z" }],
     agentVersionId: "11111111-1111-4111-8111-111111111128",
   },
+  {
+    slug: NDIS_EXAMPLE_SLUG,
+    name: NDIS_EXAMPLE_NAME,
+    category: "research",
+    pitch: NDIS_EXAMPLE_PITCH,
+    description: "Example data. A specialist desk for an accounting firm whose client is an NDIS provider. The lender names are Example Lender A, B, and C. This is not a credit offer.",
+    instructions: "Example data. Apply the specialist checks in the package. Do not invent a lender, a rate, or a measurement. Leave a missing document blank.",
+    priceMinor: 49000,
+    exampleRuns: 0,
+    featured: false,
+    createdAt: "2025-11-01T00:00:00.000Z",
+    output: { title: "Example funding note", body: "Example data: replace with your panel. The note ranks structures that passed the hard rules. Indicative, not a credit offer." },
+    reviews: [],
+    agentVersionId: "11111111-1111-4111-8111-111111111130",
+  },
 ];
 
 const HOSPITAL_REVIEWS: PublicReview[] = [
@@ -453,6 +471,13 @@ function blankTrust(example: boolean) {
     initials: example ? "EX" : "?",
     photoDataUrl: "",
   };
+}
+
+function studioFlags(agent: AgentRecord): { hasStudio: boolean; examplePanel: boolean } {
+  const studio = agent.studio;
+  if (!studio || typeof studio.publishedVersion !== "number") return { hasStudio: false, examplePanel: false };
+  const version = studio.versions.find((item) => item.number === studio.publishedVersion);
+  return { hasStudio: true, examplePanel: version?.config.exampleData === true };
 }
 
 function average(reviews: { rating: number }[]): { average: number | null; count: number } {
@@ -584,6 +609,9 @@ export function buildCatalog(db: MarketplaceDb = emptyDb()): CatalogItem[] {
       }),
       reviews,
       ...blankTrust(true),
+      hasStudio: agent.slug === NDIS_EXAMPLE_SLUG,
+      examplePanel: agent.slug === NDIS_EXAMPLE_SLUG,
+      proof: db.exampleProofs?.[agent.slug] ? toPublicProof(db.exampleProofs[agent.slug], true) : null,
     }, true));
   }
   for (const agent of db.agents) {
@@ -645,6 +673,7 @@ export function buildCatalog(db: MarketplaceDb = emptyDb()): CatalogItem[] {
       credentials: publicCredentials(seller?.credentials ?? []),
       initials: initials(seller?.name ?? "Seller"),
       photoDataUrl: seller?.photoDataUrl ?? "",
+      ...studioFlags(agent),
     }, false));
   }
   return items;
@@ -1094,6 +1123,17 @@ function queueProof(agent: AgentRecord, now: string): void {
   const changed = hash !== agent.contentHash;
   agent.version = changed ? (agent.version ?? 0) + 1 : (agent.version ?? 1);
   agent.contentHash = hash;
+  if (
+    !changed
+    && agent.proof?.status === "complete"
+    && agent.proof.fixture === false
+    && agent.proof.proven === true
+    && agent.proof.sourceHash === hash
+    && (agent.proof.tests ?? 0) >= 10
+    && agent.proof.winRate >= 0.7
+  ) {
+    return;
+  }
   const proof: ProofRecord = {
     id: randomUUID(),
     version: agent.version,
@@ -1113,6 +1153,7 @@ function queueProof(agent: AgentRecord, now: string): void {
     examples: [],
     costMinor: 0,
     capped: false,
+    sourceHash: hash,
   };
   agent.proof = proof;
 }

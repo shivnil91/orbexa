@@ -6,11 +6,16 @@ import { Notice } from "@/components/notice";
 import { ProofCoach } from "@/components/proof-coach";
 import { ProofPanel } from "@/components/proof-panel";
 import { ProofPoller } from "@/components/proof-poller";
+import { SubmitButton } from "@/components/submit-button";
 import { pageClass, primaryButton } from "@/components/styles";
+import { EXAMPLE_PANEL_BADGE } from "@/lib/studio-types";
 import { formatMoney } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { liveProven } from "@/lib/trust";
 import { isSupportedLocale } from "@/lib/locale";
 import { categoryLabel, findItem } from "@/lib/marketplace";
+import { NDIS_EXAMPLE_SLUG } from "@/lib/studio-ndis";
+import { ensureExampleProof } from "@/lib/studio-store";
 import { loadCatalog } from "@/server/catalog";
 import { currentUser } from "@/server/session";
 
@@ -28,6 +33,7 @@ export default async function ListingPage({ params }: { params: Promise<{ locale
     notFound();
   }
   const user = await currentUser();
+  if (slug === NDIS_EXAMPLE_SLUG) await ensureExampleProof();
   const item = findItem(await loadCatalog(), slug, user?.id, user?.admin ?? false);
   if (!item) {
     notFound();
@@ -47,10 +53,10 @@ export default async function ListingPage({ params }: { params: Promise<{ locale
         ) : null}
         <p className="mt-3 text-sm">{rating} · {runs}</p>
         <p className="mt-2 text-sm">{t(locale, "listing.expertName", { name: item.sellerName })}</p>
-        {item.proof?.status === "complete" ? <p className="mt-2 text-sm font-medium">{t(locale, "proof.beats", { wins: String(item.proof.wins), tests: String(item.proof.tests) })}{item.proof.proven ? "" : ` · ${t(locale, "proof.notProven")}`}</p> : null}
+        {item.proof?.status === "complete" ? <p className="mt-2 text-sm font-medium">{t(locale, "proof.beats", { wins: String(item.proof.wins), tests: String(item.proof.tests) })}{liveProven(item.proof) ? "" : ` · ${t(locale, "proof.notProven")}`}</p> : null}
         <p className="text-sm">{t(locale, "listings.uncertified")}</p>
       </header>
-      {item.example ? <Notice>{t(locale, "listing.exampleNote")}</Notice> : null}
+      {item.example || item.examplePanel ? <Notice>{item.examplePanel ? EXAMPLE_PANEL_BADGE : t(locale, "listing.exampleNote")}</Notice> : null}
       {item.status === "draft" ? <Notice>{t(locale, "listing.draft")}</Notice> : null}
       {item.status === "suspended" || item.status === "rejected" ? <Notice tone="error">{t(locale, "listing.suspended")}</Notice> : null}
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -163,7 +169,15 @@ export default async function ListingPage({ params }: { params: Promise<{ locale
                       <div className="flex flex-col gap-1 sm:flex-row sm:justify-between"><dt>{t(locale, "listing.revisions")}</dt><dd>{tier.includedRevisions}</dd></div>
                     </dl>
                     <p className="mt-4 text-sm leading-6 text-muted">{t(locale, `who.${tier.serviceLevel}`)}</p>
-                    {item.status === "published" ? (
+                    {item.status === "published" && item.hasStudio ? (
+                      <form action="/api/studio/run" className="mt-4" method="post">
+                        <input name="locale" type="hidden" value={locale} />
+                        <input name="intent" type="hidden" value="start" />
+                        <input name="slug" type="hidden" value={item.slug} />
+                        <input name="tier" type="hidden" value={tier.serviceLevel} />
+                        <SubmitButton label="Pay and open the intake" pendingLabel={t(locale, "pending")} />
+                      </form>
+                    ) : item.status === "published" ? (
                       <Link className={`${primaryButton} mt-4`} href={`/${locale}/listings/${item.slug}/intake?tier=${tier.serviceLevel}`}>
                         {t(locale, "listing.choose", { level: t(locale, `level.${tier.serviceLevel}`) })}
                       </Link>

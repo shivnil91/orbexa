@@ -5,8 +5,8 @@ import path from "node:path";
 import { packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
 import { readDb } from "./demo-store.ts";
 import { assertNoLiveStripeKey } from "./live-key.ts";
-import { draftDeliverable, modelConfigured } from "./model.ts";
-import { publishedListing, sandboxReply } from "./marketplace.ts";
+import { execute, listingPackage, modelAvailable } from "./runtime.ts";
+import { publishedListing } from "./marketplace.ts";
 import { buyerDraft, retrieveAssets, revisionDraft } from "./trust.ts";
 import { validateFeedback, type FeedbackInput, type FeedbackKind } from "@orbexa/db/feedback.ts";
 import { validateIntake } from "./intake.ts";
@@ -249,19 +249,29 @@ export async function payJob(
       job.status = "queued";
       job.startedAt = Date.now();
       if (!job.transcript) {
-        if (modelConfigured()) {
+        if (modelAvailable()) {
           job.status = "running";
           job.modelDelivery = true;
         } else {
+          const response = await execute({
+            channel: "marketplace",
+            package: listingPackage({
+              slug: job.listingSlug,
+              name: job.title,
+              sellerId: job.sellerId ?? job.tenantId,
+              instructions: job.instructions ?? "",
+            }),
+            clientId: job.tenantId,
+            sellerId: job.sellerId ?? job.tenantId,
+            requestId: job.id,
+            need: job.opportunityName,
+            answers: {},
+            recordMemory: false,
+          });
           job.cursor = job.stages.length;
           job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
           job.finishedAt = Date.now();
-          job.paragraphs = sandboxReply({
-            name: job.title,
-            instructions: job.instructions ?? "",
-            knowledge: "",
-            need: job.opportunityName,
-          });
+          job.paragraphs = response.paragraphs;
         }
       }
       await writeJob(job);
@@ -708,22 +718,31 @@ export async function deliverPaidDraft(id: string): Promise<JobRecord> {
     }
     job.modelAttempts = attempts + 1;
     await writeJob(job);
-    const outcome = await draftDeliverable({
-      name: job.title,
-      instructions: job.instructions ?? "",
-      knowledge: "",
+    const response = await execute({
+      channel: "marketplace",
+      package: listingPackage({
+        slug: job.listingSlug,
+        name: job.title,
+        sellerId: job.sellerId ?? job.tenantId,
+        instructions: job.instructions ?? "",
+      }),
+      clientId: job.tenantId,
+      sellerId: job.sellerId ?? job.tenantId,
+      requestId: job.id,
       need: job.opportunityName,
+      answers: {},
+      recordMemory: false,
     });
-    if (!outcome.ok) {
-      job.modelError = outcome.error;
+    if (response.error || response.paragraphs.length === 0) {
+      job.modelError = response.error === "isolation" || response.error === "intake" || response.error === "package" ? "provider" : (response.error ?? "empty");
       job.paragraphs = [];
       await writeJob(job);
       return job;
     }
     job.modelError = undefined;
-    job.paragraphs = outcome.paragraphs;
-    job.inputTokens = outcome.inputTokens;
-    job.outputTokens = outcome.outputTokens;
+    job.paragraphs = response.paragraphs;
+    job.inputTokens = response.meter.inputTokens;
+    job.outputTokens = response.meter.outputTokens;
     job.cursor = job.stages.length;
     job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
     job.finishedAt = Date.now();

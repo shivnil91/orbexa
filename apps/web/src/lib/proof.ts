@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { KnowledgeAsset, ProofExample, ProofRecord } from "./demo-store.ts";
 import { readDb, updateDb } from "./demo-store.ts";
+import { modelTransport } from "./runtime.ts";
 import { assertNoLiveStripeKey } from "./live-key.ts";
 import {
   JUDGE_SYSTEM,
@@ -31,7 +32,7 @@ const MODEL_TOKEN = /^[A-Za-z0-9._:-]{1,80}$/;
 const DEFAULT_MODEL = "claude-sonnet-5-5";
 const DEFAULT_JUDGE = "claude-haiku-4-5";
 
-export type ModelCall = { model: string; system: string; user: string };
+export type ModelCall = { model: string; system: string; user: string; maxCostMinor?: number };
 export type ModelResult = { text: string; inputTokens: number; outputTokens: number };
 export type ModelTransport = (call: ModelCall) => Promise<ModelResult>;
 
@@ -256,8 +257,11 @@ function gradedFromSides(
 
 export async function meteredCall(transport: ModelTransport, budget: ProofBudget, call: ModelCall): Promise<ModelResult> {
   const inputTokens = Math.max(1, Math.ceil((call.system.length + call.user.length) / 4));
-  budget.charge(callCost(call.model, inputTokens, 1024));
-  return transport(call);
+  const one = callCost(call.model, inputTokens, 1024);
+  // The router may retry on the other provider. Reserve both attempts before either starts.
+  const reserve = one * 2;
+  budget.charge(reserve);
+  return transport({ ...call, maxCostMinor: reserve });
 }
 
 export async function gradeWithModel(
@@ -488,35 +492,8 @@ const tails = new Map<string, Promise<void>>();
 
 export function anthropicTransport(key: string): ModelTransport {
   assertNoLiveStripeKey({ ANTHROPIC_API_KEY: key });
-  return async (call) => {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: call.model,
-        max_tokens: 1024,
-        system: call.system,
-        messages: [{ role: "user", content: call.user }],
-      }),
-    });
-    if (!response.ok) {
-      throw new Error("model request failed");
-    }
-    const parsed = (await response.json()) as {
-      content?: AnthropicBlock[];
-      usage?: { input_tokens?: number; output_tokens?: number };
-    };
-    const text = textFromAnthropicContent(parsed.content);
-    return {
-      text,
-      inputTokens: parsed.usage?.input_tokens ?? Math.max(1, Math.ceil(call.user.length / 4)),
-      outputTokens: parsed.usage?.output_tokens ?? Math.max(1, Math.ceil(text.length / 4)),
-    };
-  };
+  const transport = modelTransport({ ANTHROPIC_API_KEY: key });
+  return (call) => transport({ ...call, maxCostMinor: call.maxCostMinor ?? 1_000 });
 }
 
 export async function runStoredProof(slug: string, env: Record<string, string | undefined> = process.env, transport?: ModelTransport): Promise<void> {
@@ -553,12 +530,12 @@ export async function runStoredProof(slug: string, env: Record<string, string | 
       examples: gate.examples,
       version: gate.version,
       config,
-      transport: transport ?? (config.live ? anthropicTransport(config.key) : undefined),
+      transport: transport ?? (config.live ? modelTransport(env) : undefined),
     });
     await updateDb((current) => {
       const row = current.agents.find((item) => item.slug === slug);
       if (!row?.proof || row.proof.version !== gate.version || row.proof.status !== "running") return;
-      row.proof = { ...result, id: row.proof.id, startedAt: row.proof.startedAt };
+      row.proof = { ...result, id: row.proof.id, startedAt: row.proof.startedAt, sourceHash: row.proof.sourceHash ?? row.contentHash };
     });
   } catch {
     await updateDb((current) => {

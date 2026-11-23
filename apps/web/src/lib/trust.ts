@@ -337,8 +337,13 @@ export function isProven(wins: number, tests: number): boolean {
   return wins / tests > PROOF_LINE;
 }
 
+/** A stand-in scorer can win the harness. It is not a live Proven claim. */
+export function liveProven(proof: { proven?: boolean; fixture?: boolean } | null | undefined): boolean {
+  return proof?.proven === true && proof.fixture === false;
+}
+
 export function proofGroup(proof: PublicProof | null | undefined): number {
-  if (!proof || proof.example || proof.status !== "complete") return 0;
+  if (!proof || proof.example || proof.fixture || proof.status !== "complete") return 0;
   return proof.proven ? 1 : 0;
 }
 

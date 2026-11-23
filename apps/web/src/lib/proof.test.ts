@@ -186,7 +186,7 @@ test("a thinking block is skipped and later text blocks are joined", async () =>
     usage: { input_tokens: 20, output_tokens: 12 },
   }), { status: 200 });
   try {
-    const result = await anthropicTransport("sk-ant-test")({ model: "claude-sonnet-5-5", system: "sys", user: "task" });
+    const result = await anthropicTransport("sk-ant-test-key-not-a-secret-value")({ model: "claude-sonnet-5-5", system: "sys", user: "task" });
     assert.equal(result.text, "The certificate row stays open.");
     assert.equal(result.inputTokens, 20);
   } finally {
