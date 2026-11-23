@@ -66,14 +66,23 @@ export type ExpertReviewConfig = {
   slaHours: number;
 };
 
+export type ProofTaskSource = "held_out" | "category" | "expert_fact" | "seller_example";
+
 export type ProofExample = {
   task: string;
-  source: "held_out" | "seller_example";
+  source: ProofTaskSource;
   agentOutput: string;
   baselineOutput: string;
   winner: "agent" | "baseline" | "tie";
   agentScore: number;
   baselineScore: number;
+};
+
+export type ProofOutcome = {
+  task: string;
+  source: ProofTaskSource;
+  winner: "agent" | "baseline" | "tie";
+  flagged?: boolean;
 };
 
 export type ProofRecord = {
@@ -91,8 +100,14 @@ export type ProofRecord = {
   losses: number;
   winRate: number;
   proven: boolean;
+  categoryTests?: number;
+  categoryWins?: number;
+  expertTests?: number;
+  expertWins?: number;
+  judgeUnparsed?: number;
   rubric: { code: string; agent: number; baseline: number }[];
   examples: ProofExample[];
+  outcomes?: ProofOutcome[];
   costMinor: number;
   capped: boolean;
   error?: string;

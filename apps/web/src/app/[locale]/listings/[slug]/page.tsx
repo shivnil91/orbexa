@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Notice } from "@/components/notice";
+import { ProofCoach } from "@/components/proof-coach";
 import { ProofPanel } from "@/components/proof-panel";
 import { ProofPoller } from "@/components/proof-poller";
 import { pageClass, primaryButton } from "@/components/styles";
@@ -43,8 +44,7 @@ export default async function ListingPage({ params }: { params: Promise<{ locale
         <p className="mt-3 text-lg leading-8 text-muted">{item.pitch}</p>
         <p className="mt-3 text-sm">{rating} · {runs}</p>
         <p className="mt-2 text-sm">{t(locale, "listing.expertName", { name: item.sellerName })}</p>
-        {item.proof?.status === "complete" && item.proof.proven ? <p className="mt-2 text-sm font-medium">{t(locale, "proof.beats", { wins: String(item.proof.wins), tests: String(item.proof.tests) })}</p> : null}
-        {item.proof?.status === "complete" && !item.proof.proven ? <p className="mt-2 text-sm">{t(locale, "proof.notProven")}</p> : null}
+        {item.proof?.status === "complete" ? <p className="mt-2 text-sm font-medium">{t(locale, "proof.beats", { wins: String(item.proof.wins), tests: String(item.proof.tests) })}{item.proof.proven ? "" : ` · ${t(locale, "proof.notProven")}`}</p> : null}
         <p className="text-sm">{t(locale, "listings.uncertified")}</p>
       </header>
       {item.example ? <Notice>{t(locale, "listing.exampleNote")}</Notice> : null}
@@ -69,6 +69,7 @@ export default async function ListingPage({ params }: { params: Promise<{ locale
             )}
           </section>
           {item.proof ? <ProofPanel locale={locale} proof={item.proof} /> : null}
+          {user && user.id === item.ownerId && item.proof?.status === "complete" && !item.example ? <ProofCoach locale={locale} proof={item.proof} slug={item.slug} /> : null}
           {item.proof && item.proof.status !== "complete" && item.proof.status !== "failed" ? <ProofPoller slug={item.slug} /> : null}
           {item.proof && (item.proof.status === "queued" || item.proof.status === "running") ? <p className="text-sm text-muted">{t(locale, "proof.running")}</p> : null}
           <section aria-labelledby="track-title">

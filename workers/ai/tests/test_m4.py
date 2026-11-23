@@ -64,9 +64,11 @@ def test_fixture_gateway_stays_default_and_live_adapters_need_a_key() -> None:
 
 
 def test_anthropic_and_openai_adapters_build_requests_without_a_network_call() -> None:
-    anthropic = _RecordingTransport(
-        '{"content":[{"text":"{\\"requirements\\": []}"}]}'
+    body = (
+        '{"content":[{"type":"thinking","thinking":"skip"},'
+        '{"type":"text","text":"{\\"requirements\\": []}"}]}'
     )
+    anthropic = _RecordingTransport(body)
     gateway = LiveHttpGateway("anthropic", "sk-ant-test", transport=anthropic)
     result = gateway.complete("extract", [])
     assert result == {"requirements": []}

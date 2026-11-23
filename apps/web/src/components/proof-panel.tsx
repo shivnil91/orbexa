@@ -16,7 +16,16 @@ export function ProofPanel({ locale, proof }: { locale: string; proof: PublicPro
         {proof.example ? <span className="rounded-full border border-line px-3 py-1 text-sm">{t(locale, "proof.example")}</span> : null}
       </div>
       {proof.status === "complete" ? (
-        <p className="text-lg">{t(locale, "proof.beats", { wins: String(proof.wins), tests: String(proof.tests) })}</p>
+        <div className="grid gap-1">
+          <p className="text-lg">{t(locale, "proof.beats", { wins: String(proof.wins), tests: String(proof.tests) })}</p>
+          <p className="text-sm">{t(locale, "proof.categoryRate", { wins: String(proof.categoryWins), tests: String(proof.categoryTests) })}</p>
+          {proof.expertTests > 0 ? (
+            <p className="text-sm">{t(locale, "proof.expertRate", { wins: String(proof.expertWins), tests: String(proof.expertTests) })}</p>
+          ) : (
+            <p className="text-sm text-muted">{t(locale, "proof.expertNone")}</p>
+          )}
+          {proof.judgeUnparsed > 0 ? <p className="text-sm">{t(locale, "proof.judgeFlag", { count: String(proof.judgeUnparsed) })}</p> : null}
+        </div>
       ) : null}
       <p className="text-sm text-muted">
         {proof.fixture ? t(locale, "proof.fixture") : t(locale, "proof.live", { model: proof.model, judge: proof.judgeModel })}
@@ -45,7 +54,7 @@ export function ProofPanel({ locale, proof }: { locale: string; proof: PublicPro
           {proof.examples.map((example) => (
             <article key={example.task} className="grid gap-3 rounded-2xl border border-line p-4">
               <h4 className="font-medium">{example.task}</h4>
-              <p className="text-xs uppercase tracking-wide text-muted">{example.source === "seller_example" ? t(locale, "proof.sellerExample") : t(locale, "proof.heldOut")}</p>
+              <p className="text-xs uppercase tracking-wide text-muted">{example.source === "seller_example" ? t(locale, "proof.sellerExample") : example.source === "expert_fact" ? t(locale, "proof.expertTask") : t(locale, "proof.heldOut")}</p>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-xl bg-surface p-3">
                   <h5 className="text-sm font-semibold">{t(locale, "proof.agent")}</h5>

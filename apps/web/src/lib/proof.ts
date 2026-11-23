@@ -3,11 +3,14 @@ import type { KnowledgeAsset, ProofExample, ProofRecord } from "./demo-store.ts"
 import { readDb, updateDb } from "./demo-store.ts";
 import { assertNoLiveStripeKey } from "./live-key.ts";
 import {
+  JUDGE_SYSTEM,
   PROOF_SYSTEM,
+  RUBRIC,
   agentPrompt,
   baselinePrompt,
   blindOrder,
   corpusFrom,
+  expertFactTasks,
   heldOutTasks,
   isProven,
   judgePrompt,
@@ -40,7 +43,7 @@ export function proofConfig(env: Record<string, string | undefined> = process.en
   const live = key.length > 0 && !blocked;
   const requested = env.ORBEXA_MODEL || DEFAULT_MODEL;
   const judge = env.ORBEXA_JUDGE_MODEL || DEFAULT_JUDGE;
-  const budget = Number(env.ORBEXA_PROOF_BUDGET_MINOR ?? "80");
+  const budget = Number(env.ORBEXA_PROOF_BUDGET_MINOR ?? "500");
   const hourly = Number(env.ORBEXA_PROOF_HOURLY_CAP ?? "6");
   return {
     live,
@@ -52,9 +55,42 @@ export function proofConfig(env: Record<string, string | undefined> = process.en
   };
 }
 
+/** Cents per million tokens. Not a vendor invoice. The ratio follows the public Claude list. */
+const MODEL_RATES = [
+  { name: "haiku", inputPerMillion: 100, outputPerMillion: 500 },
+  { name: "sonnet", inputPerMillion: 300, outputPerMillion: 1500 },
+  { name: "opus", inputPerMillion: 1500, outputPerMillion: 7500 },
+] as const;
+
 export function callCost(model: string, inputTokens: number, outputTokens: number): number {
   if (model === "fixture") return 1;
-  return Math.max(1, Math.floor((inputTokens + outputTokens) / 1000));
+  const tokensIn = Number.isFinite(inputTokens) && inputTokens > 0 ? inputTokens : 0;
+  const tokensOut = Number.isFinite(outputTokens) && outputTokens > 0 ? outputTokens : 0;
+  const key = model.toLowerCase();
+  const rate = MODEL_RATES.find((row) => key.includes(row.name)) ?? MODEL_RATES[1];
+  const cents = (tokensIn * rate.inputPerMillion + tokensOut * rate.outputPerMillion) / 1_000_000;
+  return Math.max(1, Math.ceil(cents - 1e-9));
+}
+
+export type AnthropicBlock = { type?: string; text?: string };
+
+/** Join every text block. A thinking block can come first and has no draft in it. */
+export function textFromAnthropicContent(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const record = block as { type?: unknown; text?: unknown };
+    if (record.type !== "text" || typeof record.text !== "string") continue;
+    parts.push(record.text);
+  }
+  return parts.join("\n").trim();
+}
+
+const MIN_DRAFT = 40;
+
+export function draftIsThin(text: string): boolean {
+  return text.trim().length < MIN_DRAFT;
 }
 
 export class ProofBudget {
@@ -129,18 +165,80 @@ export function gradePair(taskId: string, agentOutput: string, baselineOutput: s
   return { agentOutput, baselineOutput, winner, agentScore, baselineScore, order, rubric: rubricRows(agentOutput, baselineOutput) };
 }
 
-function parseJudgeScores(text: string): { a: number; b: number } | null {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
+export type RubricSide = { specialist_check: number; leaves_gaps: number; no_guessed_fact: number };
+
+function zeroRubric(): RubricSide {
+  return { specialist_check: 0, leaves_gaps: 0, no_guessed_fact: 0 };
+}
+
+function rubricSum(side: RubricSide): number {
+  return side.specialist_check + side.leaves_gaps + side.no_guessed_fact;
+}
+
+function rowsFromSides(agent: RubricSide, baseline: RubricSide): { code: string; agent: number; baseline: number }[] {
+  return RUBRIC.map((item) => ({ code: item.code, agent: agent[item.code], baseline: baseline[item.code] }));
+}
+
+export function parseJudgePayload(text: string): { a: RubricSide; b: RubricSide } | null {
+  const stripped = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(text.slice(start, end + 1)) as { a?: unknown; b?: unknown };
-    if (typeof parsed.a !== "number" || typeof parsed.b !== "number") return null;
-    const clamp = (value: number) => Math.min(1, Math.max(0, value));
-    return { a: clamp(parsed.a), b: clamp(parsed.b) };
+    parsed = JSON.parse(stripped.slice(start, end + 1));
   } catch {
     return null;
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const root = parsed as Record<string, unknown>;
+  const rootKeys = Object.keys(root);
+  if (rootKeys.length !== 2 || !rootKeys.includes("a") || !rootKeys.includes("b")) return null;
+  const read = (value: unknown): RubricSide | null => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record);
+    if (keys.length !== RUBRIC.length || RUBRIC.some((item) => !keys.includes(item.code))) return null;
+    const side = zeroRubric();
+    for (const item of RUBRIC) {
+      const score = record[item.code];
+      if (typeof score !== "number" || !Number.isFinite(score)) return null;
+      side[item.code] = Math.min(1, Math.max(0, score));
+    }
+    return side;
+  };
+  const a = read(root.a);
+  const b = read(root.b);
+  if (!a || !b) return null;
+  return { a, b };
+}
+
+function gradedFromSides(
+  taskId: string,
+  agentOutput: string,
+  baselineOutput: string,
+  agentSide: RubricSide,
+  baselineSide: RubricSide,
+  flagged: boolean,
+): Graded & { flagged: boolean } {
+  const agentScore = rubricSum(agentSide);
+  const baselineScore = rubricSum(baselineSide);
+  const agentThin = draftIsThin(agentOutput);
+  const baselineThin = draftIsThin(baselineOutput);
+  let winner: Graded["winner"] = agentScore === baselineScore ? "tie" : agentScore > baselineScore ? "agent" : "baseline";
+  if (agentThin && baselineThin) winner = "tie";
+  else if (agentThin) winner = "baseline";
+  else if (baselineThin) winner = "agent";
+  return {
+    agentOutput,
+    baselineOutput,
+    winner,
+    agentScore,
+    baselineScore,
+    order: blindOrder(taskId),
+    rubric: rowsFromSides(agentThin ? zeroRubric() : agentSide, baselineThin ? zeroRubric() : baselineSide),
+    flagged,
+  };
 }
 
 export async function gradeWithModel(
@@ -151,25 +249,40 @@ export async function gradeWithModel(
   task: string,
   agentOutput: string,
   baselineOutput: string,
-): Promise<Graded> {
+): Promise<Graded & { flagged: boolean }> {
+  const agentThin = draftIsThin(agentOutput);
+  const baselineThin = draftIsThin(baselineOutput);
+  if (agentThin && baselineThin) {
+    return gradedFromSides(taskId, agentOutput, baselineOutput, zeroRubric(), zeroRubric(), true);
+  }
   const order = blindOrder(taskId);
   const left = order === "agent_first" ? agentOutput : baselineOutput;
   const right = order === "agent_first" ? baselineOutput : agentOutput;
-  const result = await transport({ model: judgeModel, system: PROOF_SYSTEM, user: judgePrompt(task, left, right) });
-  budget.charge(callCost(judgeModel, result.inputTokens, result.outputTokens));
-  const scores = parseJudgeScores(result.text);
-  const leftScore = scores ? Math.round(scores.a * 3) : qualityScore(left);
-  const rightScore = scores ? Math.round(scores.b * 3) : qualityScore(right);
-  const agentScore = order === "agent_first" ? leftScore : rightScore;
-  const baselineScore = order === "agent_first" ? rightScore : leftScore;
-  const winner = agentScore === baselineScore ? "tie" : agentScore > baselineScore ? "agent" : "baseline";
-  return { agentOutput, baselineOutput, winner, agentScore, baselineScore, order, rubric: rubricRows(agentOutput, baselineOutput) };
+  const ask = async () => {
+    const result = await transport({ model: judgeModel, system: JUDGE_SYSTEM, user: judgePrompt(task, left, right) });
+    budget.charge(callCost(judgeModel, result.inputTokens, result.outputTokens));
+    return parseJudgePayload(result.text);
+  };
+  let parsed = await ask();
+  if (!parsed) parsed = await ask();
+  if (!parsed) {
+    return { ...gradedFromSides(taskId, agentOutput, baselineOutput, zeroRubric(), zeroRubric(), true), winner: agentThin || baselineThin ? (agentThin && !baselineThin ? "baseline" : !agentThin && baselineThin ? "agent" : "tie") : "tie" };
+  }
+  const agentSide = order === "agent_first" ? parsed.a : parsed.b;
+  const baselineSide = order === "agent_first" ? parsed.b : parsed.a;
+  return gradedFromSides(taskId, agentOutput, baselineOutput, agentSide, baselineSide, false);
 }
 
-export type ProofTask = { id: string; source: "held_out" | "seller_example"; task: string };
+export type ProofTask = { id: string; source: "category" | "expert_fact" | "seller_example"; task: string };
 
-export function proofTasks(category: string, examples: { title: string; body: string }[]): ProofTask[] {
-  const held: ProofTask[] = heldOutTasks(category).map((task, index) => ({ id: `${category}-${index}`, source: "held_out", task }));
+export function proofTasks(
+  category: string,
+  assets: { text: string }[],
+  interview: { answer: string }[],
+  examples: { title: string; body: string }[],
+): ProofTask[] {
+  const expert: ProofTask[] = expertFactTasks(assets, interview).map((task, index) => ({ id: `expert-${index}`, source: "expert_fact", task }));
+  const held: ProofTask[] = heldOutTasks(category).slice(0, 10 - expert.length).map((task, index) => ({ id: `${category}-${index}`, source: "category", task }));
   const extra: ProofTask[] = examples
     .filter((item) => item.title.trim() && item.body.trim())
     .slice(0, 2)
@@ -178,7 +291,7 @@ export function proofTasks(category: string, examples: { title: string; body: st
       source: "seller_example",
       task: `Produce a draft a specialist would accept for: ${item.title}. Quality bar: ${item.body}`,
     }));
-  return held.concat(extra);
+  return expert.concat(held, extra);
 }
 
 export type ProofRunInput = {
@@ -204,8 +317,8 @@ export async function executeProof(input: ProofRunInput): Promise<ProofRecord> {
   const config = input.config.live ? input.config : { ...input.config, model: "fixture", judgeModel: "fixture", live: false };
   const budget = new ProofBudget(config.budgetMinor);
   const support = rubricSupport(corpusFrom(input));
-  const tasks = proofTasks(input.category, input.examples);
-  const graded: { task: ProofTask; grade: Graded }[] = [];
+  const tasks = proofTasks(input.category, input.assets, input.interview, input.examples);
+  const graded: { task: ProofTask; grade: Graded & { flagged: boolean } }[] = [];
   let capped = false;
   const transport = input.transport;
   try {
@@ -234,7 +347,7 @@ export async function executeProof(input: ProofRunInput): Promise<ProofRecord> {
         budget.charge(callCost("fixture", 0, 0));
         budget.charge(callCost("fixture", 0, 0));
         budget.charge(callCost("fixture", 0, 0));
-        graded.push({ task, grade: gradePair(task.id, agentOutput, baselineOutput) });
+        graded.push({ task, grade: { ...gradePair(task.id, agentOutput, baselineOutput), flagged: false } });
       }
     }
   } catch (error) {
@@ -244,7 +357,9 @@ export async function executeProof(input: ProofRunInput): Promise<ProofRecord> {
       throw error;
     }
   }
-  const held = graded.filter((row) => row.task.source === "held_out");
+  const categoryRows = graded.filter((row) => row.task.source === "category");
+  const expertRows = graded.filter((row) => row.task.source === "expert_fact");
+  const held = categoryRows.concat(expertRows);
   const wins = held.filter((row) => row.grade.winner === "agent").length;
   const ties = held.filter((row) => row.grade.winner === "tie").length;
   const losses = held.filter((row) => row.grade.winner === "baseline").length;
@@ -253,7 +368,8 @@ export async function executeProof(input: ProofRunInput): Promise<ProofRecord> {
   const proven = isProven(wins, tests);
   const side = [
     ...graded.filter((row) => row.task.source === "seller_example"),
-    ...graded.filter((row) => row.task.source === "held_out"),
+    ...expertRows,
+    ...categoryRows,
   ].slice(0, 2);
   const examples: ProofExample[] = side.map((row) => ({
     task: row.task.task,
@@ -280,6 +396,17 @@ export async function executeProof(input: ProofRunInput): Promise<ProofRecord> {
     losses,
     winRate,
     proven,
+    categoryTests: categoryRows.length,
+    categoryWins: categoryRows.filter((row) => row.grade.winner === "agent").length,
+    expertTests: expertRows.length,
+    expertWins: expertRows.filter((row) => row.grade.winner === "agent").length,
+    judgeUnparsed: graded.filter((row) => row.grade.flagged).length,
+    outcomes: graded.map((row) => ({
+      task: row.task.task,
+      source: row.task.source,
+      winner: row.grade.winner,
+      flagged: row.grade.flagged || undefined,
+    })),
     rubric: [
       { code: "specialist_check", agent: mean(held.map((row) => row.grade), "specialist_check", "agent"), baseline: mean(held.map((row) => row.grade), "specialist_check", "baseline") },
       { code: "leaves_gaps", agent: mean(held.map((row) => row.grade), "leaves_gaps", "agent"), baseline: mean(held.map((row) => row.grade), "leaves_gaps", "baseline") },
@@ -315,10 +442,10 @@ export function anthropicTransport(key: string): ModelTransport {
       throw new Error("model request failed");
     }
     const parsed = (await response.json()) as {
-      content?: { text?: string }[];
+      content?: AnthropicBlock[];
       usage?: { input_tokens?: number; output_tokens?: number };
     };
-    const text = parsed.content?.[0]?.text ?? "";
+    const text = textFromAnthropicContent(parsed.content);
     return {
       text,
       inputTokens: parsed.usage?.input_tokens ?? Math.max(1, Math.ceil(call.user.length / 4)),
@@ -376,6 +503,29 @@ export async function runStoredProof(slug: string, env: Record<string, string | 
       row.proof = { ...row.proof, status: "failed", finishedAt: new Date().toISOString(), error: "run", proven: false };
     });
   }
+}
+
+export async function queueProofRerun(ownerId: string, slug: string, env: Record<string, string | undefined> = process.env): Promise<{ ok: true } | { ok: false; error: string }> {
+  const config = proofConfig(env);
+  const db = await readDb();
+  const agent = db.agents.find((item) => item.slug === slug && item.ownerId === ownerId);
+  if (!agent?.proof) return { ok: false, error: "missing" };
+  const owner = db.users.find((user) => user.id === ownerId);
+  if (!hourlyOpen(owner?.proofRuns ?? [], Date.now(), config.hourlyCap)) return { ok: false, error: "hourly" };
+  if (agent.proof.status === "queued" || agent.proof.status === "running") return { ok: true };
+  await updateDb((current) => {
+    const row = current.agents.find((item) => item.slug === slug && item.ownerId === ownerId);
+    if (!row?.proof || row.proof.status === "queued" || row.proof.status === "running") return;
+    row.proof = {
+      ...row.proof,
+      status: "queued",
+      finishedAt: null,
+      proven: false,
+      error: undefined,
+      startedAt: new Date().toISOString(),
+    };
+  });
+  return { ok: true };
 }
 
 export function scheduleProof(slug: string, env: Record<string, string | undefined> = process.env): void {
