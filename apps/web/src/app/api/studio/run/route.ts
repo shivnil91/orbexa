@@ -1,4 +1,4 @@
-import { acceptCsv } from "@/lib/studio-calc";
+import { CSV_MAX_BYTES, decodeCsvBytes } from "@/lib/studio-calc";
 import { completeRun, requestBroker, saveRunAnswers, saveShare, startRun } from "@/lib/studio-store";
 import { formLocale, redirectTo } from "@/server/http";
 import { currentUser } from "@/server/session";
@@ -43,13 +43,13 @@ export async function POST(request: Request) {
     let bytes = 0;
     let text = "";
     if (file instanceof File && file.size > 0) {
+      if (!Number.isSafeInteger(file.size) || file.size >= CSV_MAX_BYTES) return redirectTo(request, back, { error: "csv" });
       name = file.name;
-      bytes = file.size;
-      text = await file.text();
-      const accepted = acceptCsv(name, bytes, text);
+      const raw = new Uint8Array(await file.arrayBuffer());
+      const accepted = decodeCsvBytes(name, raw);
       if (!accepted.ok) return redirectTo(request, back, { error: "csv" });
       text = accepted.text;
-      bytes = text.length;
+      bytes = raw.byteLength;
     }
     const saved = await completeRun(user.id, runId, name || "upload.csv", bytes, text);
     if (!saved.ok) return redirectTo(request, back, { error: saved.error });

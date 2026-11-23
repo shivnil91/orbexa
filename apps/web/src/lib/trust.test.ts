@@ -21,7 +21,7 @@ test("proven agents sort above a closer unproven match", () => {
     finishedAt: "2026-05-01T00:00:00.000Z",
     model: "fixture",
     judgeModel: "fixture",
-    fixture: true,
+    fixture: false,
     tests: 10,
     wins: 8,
     ties: 2,
@@ -39,6 +39,7 @@ test("proven agents sort above a closer unproven match", () => {
   proven.instructions = "Restate the next step.";
   const ranked = recommend("draft a limitation clause", items.map((item) => item.slug === proven.slug ? proven : item));
   assert.equal(proofGroup(proven.proof), 1);
+  assert.equal(proofGroup({ ...proven.proof, fixture: true }), 0);
   assert.equal(ranked[0]?.item.slug, proven.slug);
   assert.notEqual(ranked[0]?.item.slug, closer.slug);
 });

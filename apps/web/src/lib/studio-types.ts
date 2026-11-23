@@ -141,11 +141,12 @@ export type BenchResult = {
 export type StudioRecord = {
   trainingConsent: boolean;
   publishedVersion: number | null;
+  publishedPackageHash: string | null;
   provenAt: string | null;
   versions: StudioVersion[];
   changelog: { at: string; version: number; action: string; note: string }[];
   proposals: Proposal[];
-  lastBench: { at: string; coverage: number; results: BenchResult[] } | null;
+  lastBench: { at: string; coverage: number; configHash: string; results: BenchResult[] } | null;
 };
 
 export type ClaimSource =

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { formatMoney } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import type { CatalogItem } from "@/lib/marketplace";
+import { liveProven } from "@/lib/trust";
 import { initials, JobMark, laneForCategory } from "./job-mark";
 
 function proofLine(locale: string, item: CatalogItem): string | null {
@@ -10,7 +11,7 @@ function proofLine(locale: string, item: CatalogItem): string | null {
   if (proof.status === "queued" || proof.status === "running") return t(locale, "card.proofRunning");
   if (proof.status !== "complete") return null;
   const score = t(locale, "card.beats", { wins: String(proof.wins), tests: String(proof.tests) });
-  const badge = proof.proven ? t(locale, "card.proof") : t(locale, "card.notProven");
+  const badge = liveProven(proof) ? t(locale, "card.proof") : t(locale, "card.notProven");
   return `${badge} · ${score}`;
 }
 

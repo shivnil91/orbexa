@@ -1,4 +1,4 @@
-import { DEFAULT_ANTHROPIC_MODEL, MODEL_MAX_OUTPUT_TOKENS, MODEL_TIMEOUT_MS, OPENAI_MODEL } from "./model-limits.ts";
+import { DEFAULT_ANTHROPIC_MODEL, MODEL_MAX_COST_USD, MODEL_MAX_OUTPUT_TOKENS, MODEL_TIMEOUT_MS, OPENAI_MODEL } from "./model-limits.ts";
 
 export type ModelTask = "drafting" | "extraction" | "judging";
 
@@ -123,6 +123,15 @@ function isTimeout(error: unknown): boolean {
   return name === "TimeoutError" || name === "AbortError";
 }
 
+export function routeAttemptCeilingCents(): number {
+  return Math.max(1, Math.round(MODEL_MAX_COST_USD * 100));
+}
+
+export function worstAttemptCost(model: string, system: string, user: string): number {
+  const inputTokens = Math.ceil((system.length + user.length) / 4);
+  return tokenCostMinor(model, Math.max(1, inputTokens), MODEL_MAX_OUTPUT_TOKENS);
+}
+
 async function defaultFetch(url: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) {
   const response = await fetch(url, init);
   return { ok: response.ok, status: response.status, json: () => response.json() as Promise<unknown> };
@@ -171,17 +180,25 @@ export async function routeTask(input: {
   env?: RouteEnv;
   fetchImpl?: FetchLike;
   budgeted?: boolean;
+  /** Cents for the whole route, including a failed attempt and its fallback. */
+  maxCostMinor?: number;
 }): Promise<RouteResult> {
   const env = input.env ?? process.env;
   const fetchImpl = input.fetchImpl ?? defaultFetch;
   const plan = routePlan(input.task, env);
   const attempts: CostEntry[] = [];
+  const ceiling = input.maxCostMinor ?? routeAttemptCeilingCents();
   if (plan.length === 0) {
     return { ok: false, error: "provider", attempts };
   }
   let timedOut = false;
+  let spent = 0;
   for (let index = 0; index < plan.length; index += 1) {
     const step = plan[index];
+    const worst = worstAttemptCost(step.model, input.system, input.user);
+    if (!Number.isFinite(ceiling) || ceiling < 0 || spent + worst > ceiling) {
+      return { ok: false, error: "cap", attempts };
+    }
     if (!input.budgeted && !capAllows(env)) {
       return { ok: false, error: "cap", attempts };
     }
@@ -189,6 +206,7 @@ export async function routeTask(input: {
     if (!key) continue;
     try {
       const response = await callStep(step, key, input.system, input.user, fetchImpl);
+      const actual = response ? tokenCostMinor(step.model, response.inputTokens, response.outputTokens) : worst;
       const entry: CostEntry = {
         at: new Date().toISOString(),
         task: input.task,
@@ -196,15 +214,18 @@ export async function routeTask(input: {
         model: step.model,
         inputTokens: response?.inputTokens ?? 0,
         outputTokens: response?.outputTokens ?? 0,
-        costMinor: tokenCostMinor(step.model, response?.inputTokens ?? 0, response?.outputTokens ?? 0),
-        ok: Boolean(response),
+        costMinor: actual,
+        ok: Boolean(response) && spent + actual <= ceiling,
         fallback: index > 0,
       };
       attempts.push(entry);
       remember(entry);
-      if (!response) continue;
-      return { ok: true, text: response.text, provider: step.provider, model: step.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens, costMinor: entry.costMinor, attempts };
+      spent += actual;
+      if (!response || spent > ceiling) continue;
+      const total = attempts.reduce((sum, item) => sum + item.costMinor, 0);
+      return { ok: true, text: response.text, provider: step.provider, model: step.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens, costMinor: total, attempts };
     } catch (error) {
+      // The thrown provider error can quote the request. Keep it out of the cost log.
       const entry: CostEntry = {
         at: new Date().toISOString(),
         task: input.task,
@@ -212,22 +233,33 @@ export async function routeTask(input: {
         model: step.model,
         inputTokens: 0,
         outputTokens: 0,
-        costMinor: 0,
+        costMinor: worst,
         ok: false,
         fallback: index > 0,
       };
       attempts.push(entry);
       remember(entry);
+      spent += worst;
       if (isTimeout(error)) timedOut = true;
     }
+  }
+  if (attempts.some((item) => item.costMinor > 0) && spent > ceiling) {
+    return { ok: false, error: "cap", attempts };
   }
   return { ok: false, error: timedOut && attempts.every((item) => !item.ok) ? "timeout" : "provider", attempts };
 }
 
 export function routerModelTransport(env: RouteEnv = process.env) {
-  return async (call: { model: string; system: string; user: string }) => {
+  return async (call: { model: string; system: string; user: string; maxCostMinor?: number }) => {
     const task: ModelTask = /score two drafts/i.test(call.system) ? "judging" : /buyer scenarios/i.test(call.system) ? "extraction" : "drafting";
-    const routed = await routeTask({ task, system: call.system, user: call.user, env: { ...env, ORBEXA_MODEL: task === "drafting" ? call.model : env.ORBEXA_MODEL, ORBEXA_JUDGE_MODEL: task === "judging" ? call.model : env.ORBEXA_JUDGE_MODEL }, budgeted: true });
+    const routed = await routeTask({
+      task,
+      system: call.system,
+      user: call.user,
+      env: { ...env, ORBEXA_MODEL: task === "drafting" ? call.model : env.ORBEXA_MODEL, ORBEXA_JUDGE_MODEL: task === "judging" ? call.model : env.ORBEXA_JUDGE_MODEL },
+      budgeted: true,
+      maxCostMinor: call.maxCostMinor,
+    });
     if (!routed.ok) {
       throw new Error("model request failed");
     }

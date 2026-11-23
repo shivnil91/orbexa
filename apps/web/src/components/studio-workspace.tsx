@@ -5,7 +5,6 @@ import { CALCULATOR_SPECS } from "@/lib/studio-calc";
 import { EXAMPLE_PANEL_BADGE, INDICATIVE_LABEL } from "@/lib/studio-types";
 import type { Gate } from "@/lib/studio-run";
 import type { Proposal, StudioConfig, StudioRecord } from "@/lib/studio-types";
-import type { StudioRunRecord } from "@/lib/studio-store";
 
 export function StudioWorkspace({
   locale,
@@ -14,7 +13,7 @@ export function StudioWorkspace({
   config,
   studio,
   gates,
-  leads,
+  leadCount,
 }: {
   locale: string;
   slug: string;
@@ -22,7 +21,7 @@ export function StudioWorkspace({
   config: StudioConfig;
   studio: StudioRecord;
   gates: Gate[];
-  leads: StudioRunRecord[];
+  leadCount: number;
 }) {
   return (
     <div className="grid gap-8">
@@ -164,7 +163,7 @@ export function StudioWorkspace({
         <ul className="grid gap-2 text-sm">
           {config.handoff.map((trigger) => <li key={trigger.id}>{trigger.kind} at {trigger.threshold}. {trigger.note}</li>)}
         </ul>
-        {leads.length > 0 ? <p className="text-sm">{leads.length} broker lead{leads.length === 1 ? "" : "s"} waiting.</p> : null}
+        {leadCount > 0 ? <p className="text-sm">{leadCount} broker lead{leadCount === 1 ? "" : "s"} waiting.</p> : null}
       </section>
       <section className="grid gap-3" aria-labelledby="bench-title">
         <h2 id="bench-title" className="text-2xl font-semibold">Test bench</h2>

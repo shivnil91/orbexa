@@ -1,10 +1,11 @@
 import { t } from "@/lib/i18n";
-import type { PublicProof } from "@/lib/trust";
+import { liveProven, type PublicProof } from "@/lib/trust";
 
 export function ProofPanel({ locale, proof }: { locale: string; proof: PublicProof }) {
   const date = (proof.finishedAt ?? proof.startedAt).slice(0, 10);
+  const shown = liveProven(proof);
   const badge = proof.status === "complete"
-    ? (proof.proven ? t(locale, "proof.proven") : t(locale, "proof.notProven"))
+    ? (shown ? t(locale, "proof.proven") : t(locale, "proof.notProven"))
     : proof.status === "failed"
       ? t(locale, "proof.failed")
       : t(locale, "proof.running");
@@ -12,7 +13,7 @@ export function ProofPanel({ locale, proof }: { locale: string; proof: PublicPro
     <section aria-labelledby="proof-title" className="grid gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <h2 id="proof-title" className="text-2xl font-semibold">{t(locale, "proof.title")}</h2>
-        <span className={`rounded-full px-3 py-1 text-sm ${proof.proven ? "bg-supported-bg text-supported" : "bg-warning-bg text-warning"}`}>{badge}</span>
+        <span className={`rounded-full px-3 py-1 text-sm ${shown ? "bg-supported-bg text-supported" : "bg-warning-bg text-warning"}`}>{badge}</span>
         {proof.example ? <span className="rounded-full border border-line px-3 py-1 text-sm">{t(locale, "proof.example")}</span> : null}
       </div>
       {proof.status === "complete" ? (

@@ -97,12 +97,14 @@ export async function draftDeliverable(
   if (rawChars > 20_000 || estimateDraftCost(prompt.system.length + prompt.user.length) > MODEL_MAX_COST_USD) {
     return { ok: false, error: "cap" };
   }
-  const routed = await routeTask({ task: "drafting", system: prompt.system, user: prompt.user, env, fetchImpl, budgeted: false });
+  const ceiling = Math.max(1, Math.round(MODEL_MAX_COST_USD * 100));
+  const routed = await routeTask({ task: "drafting", system: prompt.system, user: prompt.user, env, fetchImpl, budgeted: false, maxCostMinor: ceiling });
   if (!routed.ok) {
     return { ok: false, error: routed.error === "empty" ? "provider" : routed.error };
   }
   const spent = routed.inputTokens * INPUT_USD_PER_TOKEN + routed.outputTokens * OUTPUT_USD_PER_TOKEN;
-  if (spent > MODEL_MAX_COST_USD) {
+  const attemptCents = routed.attempts.reduce((sum, item) => sum + item.costMinor, 0);
+  if (spent > MODEL_MAX_COST_USD || attemptCents > ceiling) {
     return { ok: false, error: "cap" };
   }
   const paragraphs = routed.text.slice(0, MODEL_MAX_OUTPUT_CHARS).split(/\n{2,}/).map((part) => part.trim()).filter((part) => part.length > 0);

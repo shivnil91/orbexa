@@ -5,14 +5,13 @@ import { applyProposal, containsPersonal, elicitWithModel, proposalsFromCorrecti
 import { NDIS_EXAMPLE_NAME, NDIS_EXAMPLE_PITCH, NDIS_EXAMPLE_SLUG, ndisStudioConfig } from "./studio-ndis.ts";
 import { acceptCsv, defaultCalculators } from "./studio-calc.ts";
 import { visibleQuestions } from "./studio-intake.ts";
-import { gatesPass, lineDiff, readinessGates, reportText, type Gate } from "./studio-run.ts";
+import { gatesPass, hardCaseSatisfied, lineDiff, readinessGates, reportText, studioConfigHash, type Gate } from "./studio-run.ts";
 import { emptyHard, type BenchResult, type OutputTemplate, type Proposal, type StudioConfig, type StudioRecord, type StudioReport, type StudioVersion } from "./studio-types.ts";
 import { EXAMPLE_SELLER_ID, saveAgent } from "./marketplace.ts";
-import { absentProof, sealPackage } from "./package.ts";
+import { absentProof, configFromPackage, sealPackage, verifyPackage, type AgentPackage } from "./package.ts";
 import { executeProof, hourlyOpen, proofConfig, scheduleProof } from "./proof.ts";
-import { routerModelTransport } from "./model-router.ts";
-import { execute } from "./runtime.ts";
-import { steersJudge } from "./trust.ts";
+import { execute, modelTransport } from "./runtime.ts";
+import { contentHash, steersJudge } from "./trust.ts";
 
 export type StudioRunRecord = {
   id: string;
@@ -69,6 +68,7 @@ export function initialStudio(config: StudioConfig, note: string): StudioRecord 
   return {
     trainingConsent: false,
     publishedVersion: null,
+    publishedPackageHash: null,
     provenAt: null,
     versions: [{ number: 1, status: "draft", note, savedAt, config: clone(config) }],
     changelog: [{ at: savedAt, version: 1, action: "draft", note }],
@@ -239,7 +239,7 @@ export async function addBenchCase(ownerId: string, slug: string, bench: StudioC
   });
 }
 
-export async function runBench(ownerId: string, slug: string): Promise<{ ok: true; results: BenchResult[]; coverage: number; gates: Gate[] } | { ok: false; error: string }> {
+export async function runBench(ownerId: string, slug: string): Promise<{ ok: true; results: BenchResult[]; coverage: number; gates: Gate[]; configHash: string } | { ok: false; error: string }> {
   const db = await readDb();
   const agent = owned(db.agents, ownerId, slug);
   if (!agent?.studio) return { ok: false, error: "missing" };
@@ -271,10 +271,11 @@ export async function runBench(ownerId: string, slug: string): Promise<{ ok: tru
     });
     const actual = response.report ? reportText(response.report).slice(0, 2000) : `Missing intake.`;
     const missing = response.report ? lineDiff(item.expect, actual) : [item.expect];
+    const hardOk = !item.hardRule || (response.report ? hardCaseSatisfied(item.expect, response.report) : false);
     results.push({
       id: item.id,
       title: item.title,
-      pass: Boolean(response.report) && missing.length === 0,
+      pass: Boolean(response.report) && missing.length === 0 && hardOk,
       hardRule: item.hardRule,
       expected: item.expect,
       actual,
@@ -283,19 +284,16 @@ export async function runBench(ownerId: string, slug: string): Promise<{ ok: tru
     });
   }
   const coverage = results.length === 0 ? 0 : Math.round((results.reduce((sum, row) => sum + row.coverage, 0) / results.length) * 1000) / 1000;
+  const configHash = studioConfigHash(config);
   await updateDb((current) => {
     const row = owned(current.agents, ownerId, slug);
     if (!row?.studio) return;
-    row.studio.lastBench = { at: new Date().toISOString(), coverage, results };
+    row.studio.lastBench = { at: new Date().toISOString(), coverage, configHash, results };
     commit(row.studio, latestConfig(row.studio), "Ran the test bench", "test");
   });
   const fresh = await readOwnedStudio(ownerId, slug);
-  const gates = readinessGates({
-    results,
-    proof: fresh?.agent.proof ?? null,
-    coverage: results.length === 0 ? null : coverage,
-  });
-  return { ok: true, results, coverage, gates };
+  const gates = fresh ? studioGates(fresh.agent) : [];
+  return { ok: true, results, coverage, gates, configHash };
 }
 
 export function proofMaterial(config: StudioConfig): { instructions: string; assets: KnowledgeAsset[]; examples: { title: string; body: string }[] } {
@@ -308,7 +306,7 @@ export function proofMaterial(config: StudioConfig): { instructions: string; ass
   const assets: KnowledgeAsset[] = [];
   for (const playbook of config.playbooks) {
     const text = `If you see ${playbook.see}, do ${playbook.do} because ${playbook.because}`;
-    if (steersJudge(text) || containsPersonal(text)) continue;
+    if (steersJudge(text) || containsPersonal(text) || /[<>]/.test(text)) continue;
     assets.push({ id: playbook.id, kind: "rule", name: `${playbook.id}.txt`, text: text.slice(0, 4000) });
     if (assets.length >= 8) break;
   }
@@ -319,15 +317,36 @@ export function proofMaterial(config: StudioConfig): { instructions: string; ass
   return { instructions, assets, examples };
 }
 
+export function publishedMaterialHash(category: string, config: StudioConfig): string {
+  const material = proofMaterial(config);
+  const example = material.examples[0];
+  return contentHash({
+    category,
+    instructions: material.instructions,
+    assets: material.assets,
+    interview: [],
+    examples: example
+      ? [{ title: example.title, body: example.body }]
+      : [{ title: "Sample", body: "Indicative, not a credit offer. A missing item is left blank." }],
+  });
+}
+
+function gatesFor(agent: AgentRecord, config: StudioConfig): Gate[] {
+  const studio = agent.studio;
+  return readinessGates({
+    results: studio?.lastBench?.results ?? null,
+    proof: agent.proof ?? null,
+    coverage: studio?.lastBench ? studio.lastBench.coverage : null,
+    configHash: studioConfigHash(config),
+    benchHash: studio?.lastBench?.configHash,
+    materialHash: publishedMaterialHash(agent.category, config),
+  });
+}
+
 export async function publishStudio(ownerId: string, slug: string, mode: "listing" | "proven"): Promise<{ ok: true; slug: string; proofQueued: boolean } | { ok: false; error: string }> {
   const current = await readOwnedStudio(ownerId, slug);
   if (!current) return { ok: false, error: "missing" };
-  const gates = readinessGates({
-    results: current.studio.lastBench?.results ?? null,
-    proof: current.agent.proof ?? null,
-    coverage: current.studio.lastBench ? current.studio.lastBench.coverage : null,
-  });
-  if (mode === "proven" && !gatesPass(gates)) return { ok: false, error: "gates" };
+  if (mode === "proven" && !gatesPass(gatesFor(current.agent, current.config))) return { ok: false, error: "gates" };
   const config = current.config;
   const material = proofMaterial(config);
   const saved = await saveAgent(ownerId, {
@@ -345,30 +364,39 @@ export async function publishStudio(ownerId: string, slug: string, mode: "listin
     priceRaw: String(current.agent.priceMinor / 100),
   }, "publish", slug);
   if (!saved.ok) return saved;
-  await updateDb((db) => {
+  const sealed = await updateDb((db) => {
     const agent = owned(db.agents, ownerId, slug);
-    if (!agent?.studio) return;
+    if (!agent?.studio) return "missing" as const;
     const configNow = latestConfig(agent.studio);
+    if (mode === "proven" && !gatesPass(gatesFor(agent, configNow))) return "gates" as const;
     commit(agent.studio, configNow, mode === "proven" ? "Published as proven" : "Published the listing", "published");
-    agent.studio.publishedVersion = agent.studio.versions[agent.studio.versions.length - 1]?.number ?? null;
-    if (mode === "proven") agent.studio.provenAt = new Date().toISOString();
+    const published = agent.studio.versions[agent.studio.versions.length - 1];
+    agent.studio.publishedVersion = published?.number ?? null;
+    agent.studio.provenAt = mode === "proven" ? new Date().toISOString() : null;
     agent.trainingConsent = agent.studio.trainingConsent === true;
-    const sealed = sealPackage({
+    const proof = agent.proof && agent.proof.fixture === false && agent.proof.proven === true && agent.proof.status === "complete"
+      ? { status: agent.proof.status, winRate: agent.proof.winRate, proven: true, fixture: false, version: agent.proof.version }
+      : agent.proof
+        ? { status: agent.proof.status, winRate: agent.proof.winRate, proven: false, fixture: agent.proof.fixture !== false, version: agent.proof.version }
+        : absentProof();
+    const pack = sealPackage({
       id: randomUUID(),
       packageVersion: agent.studio.publishedVersion ?? 1,
       sellerId: ownerId,
       slug,
       name: agent.name,
       kind: "studio",
-      config: latestConfig(agent.studio),
-      proof: agent.proof
-        ? { status: agent.proof.status, winRate: agent.proof.winRate, proven: agent.proof.proven, fixture: agent.proof.fixture, version: agent.proof.version }
-        : absentProof(),
+      config: published?.config ?? configNow,
+      proof,
       instructions: agent.instructions,
       trainingConsent: agent.studio.trainingConsent === true,
     });
-    agent.packages = (agent.packages ?? []).concat(sealed);
+    if (!verifyPackage(pack)) return "gates" as const;
+    agent.packages = (agent.packages ?? []).concat(pack);
+    agent.studio.publishedPackageHash = pack.contentHash;
+    return "ok" as const;
   });
+  if (sealed !== "ok") return { ok: false, error: sealed === "gates" ? "gates" : "missing" };
   return { ok: true, slug: saved.slug, proofQueued: saved.proofQueued };
 }
 
@@ -376,7 +404,7 @@ export async function rollbackStudio(ownerId: string, slug: string, version: num
   return updateOwned(ownerId, slug, `Rolled back to version ${version}`, "draft", (config, studio) => {
     const previous = studio.versions.find((item) => item.number === version);
     if (!previous) return null;
-    return previous.config;
+    return clone(previous.config);
   });
 }
 
@@ -420,24 +448,58 @@ export async function decideProposal(ownerId: string, slug: string, proposalId: 
 }
 
 export function studioGates(agent: AgentRecord): Gate[] {
-  const studio = agent.studio;
-  if (!studio) return [];
-  return readinessGates({
-    results: studio.lastBench?.results ?? null,
-    proof: agent.proof ?? null,
-    coverage: studio.lastBench ? studio.lastBench.coverage : null,
+  if (!agent.studio) return [];
+  return gatesFor(agent, latestConfig(agent.studio));
+}
+
+function examplePackage(): AgentPackage {
+  return sealPackage({
+    id: `pkg_${NDIS_EXAMPLE_SLUG}`,
+    packageVersion: 1,
+    sellerId: EXAMPLE_SELLER_ID,
+    slug: NDIS_EXAMPLE_SLUG,
+    name: NDIS_EXAMPLE_NAME,
+    kind: "studio",
+    config: ndisStudioConfig(),
+    proof: absentProof(),
+    instructions: "Apply the example package. Do not invent a lender or a rate.",
+    trainingConsent: false,
+    createdAt: "2026-01-01T00:00:00.000Z",
   });
 }
 
-async function priceFor(slug: string): Promise<{ sellerId: string; priceMinor: number; name: string; config: StudioConfig } | null> {
+function packageForAgent(agent: AgentRecord): AgentPackage | null {
+  const hash = agent.studio?.publishedPackageHash;
+  if (!hash) return null;
+  const pack = (agent.packages ?? []).find((item) => item.contentHash === hash && item.sellerId === agent.ownerId);
+  if (!pack || !verifyPackage(pack)) return null;
+  return pack;
+}
+
+async function priceFor(slug: string): Promise<{ sellerId: string; priceMinor: number; name: string; config: StudioConfig; pack: AgentPackage } | null> {
   if (slug === NDIS_EXAMPLE_SLUG) {
-    return { sellerId: EXAMPLE_SELLER_ID, priceMinor: 49000, name: NDIS_EXAMPLE_NAME, config: ndisStudioConfig() };
+    const pack = examplePackage();
+    if (!verifyPackage(pack)) return null;
+    return { sellerId: EXAMPLE_SELLER_ID, priceMinor: 49000, name: NDIS_EXAMPLE_NAME, config: configFromPackage(pack), pack };
   }
   const db = await readDb();
   const agent = db.agents.find((item) => item.slug === slug && item.status === "published" && item.studio);
-  const config = agent?.studio ? publishedConfig(agent.studio) : null;
-  if (!agent || !config) return null;
-  return { sellerId: agent.ownerId, priceMinor: agent.priceMinor, name: agent.name, config };
+  if (!agent) return null;
+  const pack = packageForAgent(agent);
+  if (!pack) return null;
+  return { sellerId: agent.ownerId, priceMinor: agent.priceMinor, name: agent.name, config: configFromPackage(pack), pack };
+}
+
+const ANSWER_KEY = /^[a-z][a-z0-9_]{0,40}$/i;
+
+function clipAnswers(config: StudioConfig, answers: Record<string, string>): Record<string, string> {
+  const allowed = new Set(config.intake.map((question) => question.id));
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(answers)) {
+    if (!ANSWER_KEY.test(key) || !allowed.has(key) || typeof value !== "string") continue;
+    next[key] = value.replace(/\u0000/g, "").replace(/[<>]/g, "").slice(0, 500);
+  }
+  return next;
 }
 
 export async function startRun(buyerId: string, slug: string, tier: string): Promise<{ ok: true; run: StudioRunRecord } | { ok: false; error: string }> {
@@ -470,9 +532,11 @@ export async function readRun(viewerId: string, runId: string, admin = false): P
   const db = await readDb();
   const run = (db.studioRuns ?? []).find((item) => item.id === runId);
   if (!run) return null;
-  if (!admin && run.buyerId !== viewerId && run.sellerId !== viewerId) return null;
+  const buyer = run.buyerId === viewerId;
+  const broker = run.sellerId === viewerId && run.brokerRequested === true;
+  if (!admin && !buyer && !broker) return null;
   const published = await priceFor(run.slug);
-  if (!published) return null;
+  if (!published || published.sellerId !== run.sellerId) return null;
   return { run: run as StudioRunRecord, config: published.config };
 }
 
@@ -480,7 +544,15 @@ export async function saveRunAnswers(viewerId: string, runId: string, answers: R
   const result = await updateDb((db) => {
     const run = (db.studioRuns ?? []).find((item) => item.id === runId && item.buyerId === viewerId);
     if (!run) return false;
-    run.answers = { ...run.answers, ...answers };
+    const config = run.slug === NDIS_EXAMPLE_SLUG
+      ? ndisStudioConfig()
+      : (() => {
+        const agent = db.agents.find((item) => item.slug === run.slug && item.ownerId === run.sellerId && item.status === "published");
+        const pack = agent ? packageForAgent(agent) : null;
+        return pack ? configFromPackage(pack) : null;
+      })();
+    if (!config) return false;
+    run.answers = clipAnswers(config, { ...run.answers, ...answers });
     run.report = null;
     return true;
   });
@@ -492,26 +564,15 @@ export async function completeRun(viewerId: string, runId: string, csvName: stri
   if (!accepted.ok) return accepted;
   const loaded = await readRun(viewerId, runId);
   if (!loaded || loaded.run.buyerId !== viewerId) return { ok: false, error: "missing" };
-  const sealed = sealPackage({
-    id: `run-${runId}`,
-    packageVersion: 1,
-    sellerId: loaded.run.sellerId,
-    slug: loaded.run.slug,
-    name: "Studio run",
-    kind: "studio",
-    config: loaded.config,
-    proof: absentProof(),
-    instructions: "Apply the sealed package. Do not invent a lender or a rate.",
-    trainingConsent: false,
-    createdAt: "2026-01-01T00:00:00.000Z",
-  });
+  const published = await priceFor(loaded.run.slug);
+  if (!published || published.sellerId !== loaded.run.sellerId || !verifyPackage(published.pack)) return { ok: false, error: "missing" };
   const response = await execute({
     channel: "studio",
-    package: sealed,
+    package: published.pack,
     clientId: loaded.run.clientId,
-    sellerId: loaded.run.sellerId,
+    sellerId: published.pack.sellerId,
     requestId: runId,
-    answers: loaded.run.answers,
+    answers: clipAnswers(published.config, loaded.run.answers),
     csv: accepted.text,
     recordMemory: true,
   }, env);
@@ -556,17 +617,26 @@ export async function saveShare(token: string, answers: Record<string, string>):
   if (!/^[a-f0-9]{32}$/.test(token)) return { ok: false, error: "missing" };
   const result = await updateDb((db) => {
     const run = (db.studioRuns ?? []).find((item) => item.shareToken === token);
-    if (!run) return false;
-    run.answers = { ...run.answers, ...answers };
-    run.report = null;
+    if (!run || run.report) return false;
+    const config = run.slug === NDIS_EXAMPLE_SLUG
+      ? ndisStudioConfig()
+      : (() => {
+        const agent = db.agents.find((item) => item.slug === run.slug && item.ownerId === run.sellerId && item.status === "published");
+        const pack = agent ? packageForAgent(agent) : null;
+        return pack ? configFromPackage(pack) : null;
+      })();
+    if (!config) return false;
+    run.answers = clipAnswers(config, { ...run.answers, ...answers });
     return true;
   });
   return result ? { ok: true } : { ok: false, error: "missing" };
 }
 
-export async function leadsFor(ownerId: string, slug: string): Promise<StudioRunRecord[]> {
+export async function leadsFor(ownerId: string, slug: string): Promise<{ createdAt: string }[]> {
   const db = await readDb();
-  return (db.studioRuns ?? []).filter((run) => run.sellerId === ownerId && run.slug === slug && run.brokerRequested) as StudioRunRecord[];
+  return (db.studioRuns ?? [])
+    .filter((run) => run.sellerId === ownerId && run.slug === slug && run.brokerRequested)
+    .map((run) => ({ createdAt: run.createdAt }));
 }
 
 export async function ensureExampleProof(env: Record<string, string | undefined> = process.env): Promise<void> {
@@ -614,7 +684,7 @@ export async function ensureExampleProof(env: Record<string, string | undefined>
       examples: material.examples.length > 0 ? material.examples : [{ title: "Wages file", body: "A missing document is left blank. No lender rate was invented." }],
       version: 1,
       config,
-      transport: config.live ? routerModelTransport(env) : undefined,
+      transport: config.live ? modelTransport(env) : undefined,
     });
     await updateDb((db) => {
       const current = db.exampleProofs?.[NDIS_EXAMPLE_SLUG];

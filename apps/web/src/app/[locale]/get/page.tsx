@@ -7,6 +7,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { inputClass, pageClass } from "@/components/styles";
 import { formatMoney } from "@/lib/format";
 import { messageFor, t } from "@/lib/i18n";
+import { liveProven } from "@/lib/trust";
 import { isSupportedLocale } from "@/lib/locale";
 import { recommend } from "@/lib/marketplace";
 import { loadCatalog } from "@/server/catalog";
@@ -73,8 +74,8 @@ export default async function GetPage({
                       <p className="text-2xl font-semibold">{price}</p>
                       {match.item.proof?.status === "complete" ? (
                         <p className="text-sm font-medium">
-                          <span className={`rounded-full px-2 py-0.5 ${match.item.proof.proven ? "bg-supported-bg text-supported" : "bg-warning-bg text-warning"}`}>
-                            {match.item.proof.proven ? t(locale, "card.proof") : t(locale, "card.notProven")}
+                          <span className={`rounded-full px-2 py-0.5 ${liveProven(match.item.proof) ? "bg-supported-bg text-supported" : "bg-warning-bg text-warning"}`}>
+                            {liveProven(match.item.proof) ? t(locale, "card.proof") : t(locale, "card.notProven")}
                           </span>
                           {" "}
                           {t(locale, "card.beats", { wins: String(match.item.proof.wins), tests: String(match.item.proof.tests) })}

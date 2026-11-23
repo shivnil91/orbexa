@@ -42,6 +42,28 @@ export const CALCULATOR_SPECS: Record<CalculatorId, { title: string; formula: st
 
 const CALCULATOR_IDS: CalculatorId[] = ["cashflow_gap", "debtor_days", "dscr", "serviceability", "facility_size"];
 
+export const CSV_MAX_BYTES = 1_000_000;
+export const CSV_MAX_ROWS = 2_000;
+export const CSV_MAX_LINE = 10_000;
+const CSV_HTML = /<\s*\/?\s*(script|svg|iframe|img|object|embed|link|meta|html|body|style|math)\b/i;
+
+function formulaCell(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/^[=+@]/.test(trimmed) || trimmed.startsWith("\t") || trimmed.startsWith("\r")) return true;
+  if (trimmed.startsWith("-") && !/^-?\d+(\.\d+)?$/.test(trimmed.replace(/[$,\s]/g, ""))) return true;
+  return false;
+}
+
+/** Prefix spreadsheet formulas so a later export cannot run them. */
+export function neutralizeSpreadsheet(text: string): string {
+  return text.split(/\r?\n/).map((line) => line.split(",").map((cell) => {
+    const trimmed = cell.trim();
+    if (!formulaCell(trimmed)) return cell;
+    return `'${trimmed.replace(/^'+/, "")}`;
+  }).join(",")).join("\n");
+}
+
 export function defaultCalculators(): CalculatorSetting[] {
   return [
     { id: "cashflow_gap", enabled: false, assumptions: { startingCash: 0 } },
@@ -56,15 +78,34 @@ export function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+export function decodeCsvBytes(name: string, bytes: Uint8Array): { ok: true; text: string } | { ok: false; error: "csv" } {
+  if (bytes.byteLength === 0 || bytes.byteLength >= CSV_MAX_BYTES) return { ok: false, error: "csv" };
+  if (bytes.byteLength >= 2 && ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff))) {
+    return { ok: false, error: "csv" };
+  }
+  let text = "";
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return { ok: false, error: "csv" };
+  }
+  return acceptCsv(name, bytes.byteLength, text);
+}
+
 export function acceptCsv(name: string, bytes: number, text: string): { ok: true; text: string } | { ok: false; error: "csv" } {
   const safeName = name.replace(/[^\w.\- ]+/g, "").trim().toLowerCase();
   if (!safeName.endsWith(".csv")) return { ok: false, error: "csv" };
-  if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes >= 1_000_000) return { ok: false, error: "csv" };
-  if (text.length === 0 || text.length >= 1_000_000) return { ok: false, error: "csv" };
-  if (text.includes("\u0000")) return { ok: false, error: "csv" };
-  if (/<\s*\/?\s*(script|svg|iframe|html|object)\b/i.test(text)) return { ok: false, error: "csv" };
+  if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes >= CSV_MAX_BYTES) return { ok: false, error: "csv" };
+  if (text.length === 0 || text.length >= CSV_MAX_BYTES) return { ok: false, error: "csv" };
+  if (text.includes("\u0000") || text.includes("\uFFFD")) return { ok: false, error: "csv" };
+  if (CSV_HTML.test(text)) return { ok: false, error: "csv" };
   if (!text.includes(",")) return { ok: false, error: "csv" };
-  return { ok: true, text: text.replace(/^\uFEFF/, "") };
+  const stripped = text.replace(/^\uFEFF/, "");
+  const lines = stripped.split(/\r?\n/);
+  const filled = lines.filter((line) => line.trim().length > 0);
+  if (filled.length < 2 || filled.length > CSV_MAX_ROWS) return { ok: false, error: "csv" };
+  if (filled.some((line) => line.length > CSV_MAX_LINE || line.split(",").length > 32)) return { ok: false, error: "csv" };
+  return { ok: true, text: neutralizeSpreadsheet(stripped) };
 }
 
 export function parseCashflowCsv(text: string): WeekRow[] {

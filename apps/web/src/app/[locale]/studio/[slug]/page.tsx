@@ -38,7 +38,7 @@ export default async function StudioEditorPage({
       <StudioWorkspace
         config={owned.config}
         gates={studioGates(owned.agent)}
-        leads={leads}
+        leadCount={leads.length}
         locale={locale}
         name={owned.agent.name}
         slug={slug}

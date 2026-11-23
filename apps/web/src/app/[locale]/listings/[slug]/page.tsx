@@ -11,6 +11,7 @@ import { pageClass, primaryButton } from "@/components/styles";
 import { EXAMPLE_PANEL_BADGE } from "@/lib/studio-types";
 import { formatMoney } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { liveProven } from "@/lib/trust";
 import { isSupportedLocale } from "@/lib/locale";
 import { categoryLabel, findItem } from "@/lib/marketplace";
 import { NDIS_EXAMPLE_SLUG } from "@/lib/studio-ndis";
@@ -52,7 +53,7 @@ export default async function ListingPage({ params }: { params: Promise<{ locale
         ) : null}
         <p className="mt-3 text-sm">{rating} · {runs}</p>
         <p className="mt-2 text-sm">{t(locale, "listing.expertName", { name: item.sellerName })}</p>
-        {item.proof?.status === "complete" ? <p className="mt-2 text-sm font-medium">{t(locale, "proof.beats", { wins: String(item.proof.wins), tests: String(item.proof.tests) })}{item.proof.proven ? "" : ` · ${t(locale, "proof.notProven")}`}</p> : null}
+        {item.proof?.status === "complete" ? <p className="mt-2 text-sm font-medium">{t(locale, "proof.beats", { wins: String(item.proof.wins), tests: String(item.proof.tests) })}{liveProven(item.proof) ? "" : ` · ${t(locale, "proof.notProven")}`}</p> : null}
         <p className="text-sm">{t(locale, "listings.uncertified")}</p>
       </header>
       {item.example || item.examplePanel ? <Notice>{item.examplePanel ? EXAMPLE_PANEL_BADGE : t(locale, "listing.exampleNote")}</Notice> : null}

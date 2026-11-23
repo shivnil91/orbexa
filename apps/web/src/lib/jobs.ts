@@ -734,7 +734,7 @@ export async function deliverPaidDraft(id: string): Promise<JobRecord> {
       recordMemory: false,
     });
     if (response.error || response.paragraphs.length === 0) {
-      job.modelError = response.error === "isolation" || response.error === "intake" ? "provider" : (response.error ?? "empty");
+      job.modelError = response.error === "isolation" || response.error === "intake" || response.error === "package" ? "provider" : (response.error ?? "empty");
       job.paragraphs = [];
       await writeJob(job);
       return job;

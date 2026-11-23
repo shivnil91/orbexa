@@ -1,7 +1,39 @@
+import { createHash } from "node:crypto";
 import { parseCashflowCsv, runCalculators, type FactBag } from "./studio-calc.ts";
 import { factsFrom, joinedAnswers, missingRequired, scopeMatch } from "./studio-intake.ts";
 import { applyPanel } from "./studio-rules.ts";
 import { coverageOf, EXAMPLE_PANEL_BADGE, INDICATIVE_LABEL, type Claim, type Playbook, type StudioConfig, type StudioReport } from "./studio-types.ts";
+
+/** Drop markup before a playbook, template, or answer is stored on a report. */
+export function plainStudioText(value: string): string {
+  return value.replace(/\u0000/g, "").replace(/[<>]/g, "").replace(/javascript:/gi, "");
+}
+
+export function studioConfigHash(config: StudioConfig): string {
+  const stable = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map((item) => stable(item)).join(",")}]`;
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      const entries = Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stable(record[key])}`);
+      return `{${entries.join(",")}}`;
+    }
+    return JSON.stringify(value);
+  };
+  return createHash("sha256").update(stable(config)).digest("hex");
+}
+
+/** A hard-rule case counts only when it names a real knock-out or a real eligible pair. */
+export function hardCaseSatisfied(expect: string, report: StudioReport): boolean {
+  const lines = expect.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  if (lines.length === 0) return false;
+  return lines.every((line) => {
+    if (/^rule:[a-z0-9_:-]+$/i.test(line)) return report.knockouts.some((row) => row.ruleId === line);
+    return report.ranked.some((row) => {
+      const pair = `${row.product} with ${row.lender}`;
+      return line === pair || line.startsWith(`${pair}`);
+    });
+  });
+}
 
 function claim(text: string, source: Claim["source"], claims: Claim[]): void {
   claims.push({ id: `c${claims.length + 1}`, text, source });
@@ -32,9 +64,9 @@ export function runStudio(config: StudioConfig, answers: Record<string, string>,
   const text = joinedAnswers(config.intake, answers);
   const claims: Claim[] = [];
   const scope = config.specialty.scope.find((rule) => scopeMatch(rule, facts, text));
-  const refused = scope?.action === "refuse" ? { ruleId: `scope:${scope.id}`, reason: scope.reason } : null;
+  const refused = scope?.action === "refuse" ? { ruleId: `scope:${scope.id}`, reason: plainStudioText(scope.reason) } : null;
   if (refused && scope) {
-    claim(refused.reason, { type: "rule", id: refused.ruleId }, claims);
+    claim(plainStudioText(refused.reason), { type: "rule", id: refused.ruleId }, claims);
   }
   const rows = csv.trim() ? parseCashflowCsv(csv) : [];
   const calculations = runCalculators(config.calculators, facts, rows);
@@ -60,7 +92,7 @@ export function runStudio(config: StudioConfig, answers: Record<string, string>,
     lenderId: row.lenderId,
     product: row.product,
     lender: row.lender,
-    why: row.soft || "Hard rules passed. No soft preference was written for this cell.",
+    why: plainStudioText(row.soft) || "Hard rules passed. No soft preference was written for this cell.",
     indicative,
   }));
   for (const row of ranked) {
@@ -68,14 +100,15 @@ export function runStudio(config: StudioConfig, answers: Record<string, string>,
   }
   const matched = playbooksFor(config.playbooks, text);
   for (const playbook of matched) {
-    claim(`If you see ${playbook.see}, do ${playbook.do} because ${playbook.because}`, { type: "playbook", id: `playbook:${playbook.id}` }, claims);
+    claim(plainStudioText(`If you see ${playbook.see}, do ${playbook.do} because ${playbook.because}`), { type: "playbook", id: `playbook:${playbook.id}` }, claims);
   }
   const checklist: { id: string; text: string }[] = [];
   for (const playbook of matched) {
     playbook.documents.forEach((document, index) => {
       const id = `doc:${playbook.id}:${index + 1}`;
-      checklist.push({ id, text: document });
-      claim(`Document to collect: ${document}`, { type: "document", id }, claims);
+      const label = plainStudioText(document);
+      checklist.push({ id, text: label });
+      claim(`Document to collect: ${label}`, { type: "document", id }, claims);
     });
   }
   for (const question of config.intake) {
@@ -88,7 +121,7 @@ export function runStudio(config: StudioConfig, answers: Record<string, string>,
   }
   const equity = /\bequity\b/i.test(facts.purpose);
   const deal = facts.dealSize ?? 0;
-  let handoff: StudioReport["handoff"] = scope?.action === "handoff" ? { triggerId: `scope:${scope.id}`, reason: scope.reason } : null;
+  let handoff: StudioReport["handoff"] = scope?.action === "handoff" ? { triggerId: `scope:${scope.id}`, reason: plainStudioText(scope.reason) } : null;
   if (!refused && !handoff) {
     for (const trigger of config.handoff) {
       const hit = trigger.kind === "deal_size"
@@ -97,16 +130,16 @@ export function runStudio(config: StudioConfig, answers: Record<string, string>,
           ? equity
           : knockouts.length >= trigger.threshold;
       if (hit) {
-        handoff = { triggerId: `handoff:${trigger.id}`, reason: trigger.note };
+        handoff = { triggerId: `handoff:${trigger.id}`, reason: plainStudioText(trigger.note) };
         break;
       }
     }
   }
   if (handoff) claim(handoff.reason, { type: "rule", id: handoff.triggerId }, claims);
   const template = (kind: StudioConfig["templates"][number]["kind"]) => config.templates.find((item) => item.kind === kind);
-  const fundingPreface = template("funding_report")?.preface.trim();
-  const packPreface = template("lender_pack")?.preface.trim();
-  const summaryPreface = template("client_summary")?.preface.trim();
+  const fundingPreface = plainStudioText(template("funding_report")?.preface.trim() ?? "");
+  const packPreface = plainStudioText(template("lender_pack")?.preface.trim() ?? "");
+  const summaryPreface = plainStudioText(template("client_summary")?.preface.trim() ?? "");
   const fundingReport = [
     config.exampleData ? EXAMPLE_PANEL_BADGE : "",
     fundingPreface ?? "",
@@ -121,7 +154,7 @@ export function runStudio(config: StudioConfig, answers: Record<string, string>,
   ].filter((line) => line.length > 0);
   const lenderPack = [
     packPreface ?? "",
-    `Niche: ${config.specialty.niche}`,
+    `Niche: ${plainStudioText(config.specialty.niche)}`,
     ...calculations.map((calc) => `${calc.title}: ${calc.result} Formula: ${calc.formula}`),
     ...ranked.map((row) => `Eligible: ${row.product} with ${row.lender}.`),
     ...knockouts.map((row) => `Ineligible: ${row.ruleId}.`),
@@ -131,7 +164,7 @@ export function runStudio(config: StudioConfig, answers: Record<string, string>,
   const top = ranked[0];
   const clientSummary = [
     summaryPreface ?? "",
-    config.specialty.audience ? `For: ${config.specialty.audience}` : "",
+    config.specialty.audience ? `For: ${plainStudioText(config.specialty.audience)}` : "",
     refused ? `Nothing was prepared. ${refused.reason}` : top ? `The first structure to discuss is ${top.product} with ${top.lender}. ${top.indicative}` : "No structure passed the hard rules.",
     checklist.length > 0 ? `Still to collect: ${checklist.map((item) => item.text).join("; ")}.` : "No extra document was listed.",
     handoff ? "The broker should take this from here." : "The broker has not been asked to take this yet.",
@@ -144,7 +177,12 @@ export function runStudio(config: StudioConfig, answers: Record<string, string>,
     ranked,
     knockouts,
     calculations: calculations.map((calc) => ({ id: calc.id, title: calc.title, formula: calc.formula, assumptions: calc.assumptions, result: calc.result, ok: calc.ok })),
-    playbooks: matched.map((playbook) => ({ id: playbook.id, see: playbook.see, do: playbook.do, because: playbook.because })),
+    playbooks: matched.map((playbook) => ({
+      id: playbook.id,
+      see: plainStudioText(playbook.see),
+      do: plainStudioText(playbook.do),
+      because: plainStudioText(playbook.because),
+    })),
     checklist,
     fundingReport,
     lenderPack,
@@ -157,7 +195,7 @@ export function runStudio(config: StudioConfig, answers: Record<string, string>,
 
 /** Model prose is appended as model reasoning. It cannot add or remove a knock-out. */
 export function attachModelReasoning(report: StudioReport, text: string): StudioReport {
-  const sentences = text.replace(/\s+/g, " ").split(/(?<=[.?!])\s+/).map((part) => part.trim()).filter((part) => part.length > 20).slice(0, 3);
+  const sentences = plainStudioText(text).replace(/\s+/g, " ").split(/(?<=[.?!])\s+/).map((part) => part.trim()).filter((part) => part.length > 20).slice(0, 3);
   if (sentences.length === 0) return report;
   const claims = [...report.claims];
   for (const sentence of sentences) {
@@ -175,17 +213,30 @@ export function lineDiff(expected: string, actual: string): string[] {
 export type Gate = { id: "bench" | "proof" | "coverage"; pass: boolean; label: string; detail: string };
 
 export function readinessGates(input: {
-  results: { hardRule: boolean; pass: boolean }[] | null;
-  proof: { status?: string; fixture?: boolean; winRate?: number; proven?: boolean } | null;
+  results: { hardRule: boolean; pass: boolean; expected?: string }[] | null;
+  proof: { status?: string; fixture?: boolean; winRate?: number; proven?: boolean; tests?: number; sourceHash?: string } | null;
   coverage: number | null;
+  configHash?: string;
+  benchHash?: string;
+  materialHash?: string;
 }): Gate[] {
   const hard = (input.results ?? []).filter((row) => row.hardRule);
-  const hardPass = hard.filter((row) => row.pass).length;
-  const bench: Gate = hard.length === 0
-    ? { id: "bench", pass: false, label: "Test bench", detail: "No hard-rule case has been run. This gate has nothing to measure." }
-    : hardPass === hard.length
-      ? { id: "bench", pass: true, label: "Test bench", detail: `${hardPass} of ${hard.length} hard-rule cases passed.` }
-      : { id: "bench", pass: false, label: "Test bench", detail: `${hardPass} of ${hard.length} hard-rule cases passed. All of them have to pass.` };
+  const hardPass = hard.filter((row) => row.pass);
+  const bound = Boolean(input.benchHash) && input.benchHash === input.configHash;
+  const sawKnockout = hardPass.some((row) => /^rule:/im.test(row.expected ?? ""));
+  const sawEligible = hardPass.some((row) => (row.expected ?? "").includes(" with "));
+  let bench: Gate;
+  if (hard.length === 0) {
+    bench = { id: "bench", pass: false, label: "Test bench", detail: "No hard-rule case has been run. This gate has nothing to measure." };
+  } else if (!bound) {
+    bench = { id: "bench", pass: false, label: "Test bench", detail: "The test bench does not match the current specialist file. Run it again after the last edit." };
+  } else if (hardPass.length !== hard.length) {
+    bench = { id: "bench", pass: false, label: "Test bench", detail: `${hardPass.length} of ${hard.length} hard-rule cases passed. All of them have to pass.` };
+  } else if (!sawKnockout || !sawEligible) {
+    bench = { id: "bench", pass: false, label: "Test bench", detail: "Hard-rule cases have to include one real knock-out and one real eligible product-lender pair. A line that appears on every report does not count." };
+  } else {
+    bench = { id: "bench", pass: true, label: "Test bench", detail: `${hardPass.length} of ${hard.length} hard-rule cases passed on this version of the file.` };
+  }
   const proof = input.proof;
   let proofGate: Gate;
   if (!proof || proof.status !== "complete") {
@@ -193,10 +244,12 @@ export function readinessGates(input: {
   } else if (proof.fixture !== false) {
     const rate = Math.round((proof.winRate ?? 0) * 100);
     proofGate = { id: "proof", pass: false, label: "Proof", detail: `The stand-in scorer reported ${rate}% wins. That is not a win rate against the same frontier model without the expert layer.` };
-  } else if ((proof.winRate ?? 0) >= 0.7) {
-    proofGate = { id: "proof", pass: true, label: "Proof", detail: `Win rate ${Math.round((proof.winRate ?? 0) * 100)}% against the same frontier model without the expert layer.` };
-  } else {
+  } else if (proof.proven !== true || (proof.tests ?? 0) < 10 || (proof.winRate ?? 0) < 0.7) {
     proofGate = { id: "proof", pass: false, label: "Proof", detail: `Win rate ${Math.round((proof.winRate ?? 0) * 100)}% is under 70% against the same frontier model without the expert layer.` };
+  } else if (!proof.sourceHash || !input.materialHash || proof.sourceHash !== input.materialHash) {
+    proofGate = { id: "proof", pass: false, label: "Proof", detail: "The live proof was not run on this version of the specialist material." };
+  } else {
+    proofGate = { id: "proof", pass: true, label: "Proof", detail: `Win rate ${Math.round((proof.winRate ?? 0) * 100)}% against the same frontier model without the expert layer.` };
   }
   const coverage = input.coverage;
   const coverageGate: Gate = coverage == null

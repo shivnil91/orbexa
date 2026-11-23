@@ -114,6 +114,8 @@ export type ProofRecord = {
   costMinor: number;
   capped: boolean;
   error?: string;
+  /** Hash of the seller material this proof was queued against. */
+  sourceHash?: string;
 };
 
 export type AgentRecord = {

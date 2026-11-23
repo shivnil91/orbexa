@@ -1123,6 +1123,17 @@ function queueProof(agent: AgentRecord, now: string): void {
   const changed = hash !== agent.contentHash;
   agent.version = changed ? (agent.version ?? 0) + 1 : (agent.version ?? 1);
   agent.contentHash = hash;
+  if (
+    !changed
+    && agent.proof?.status === "complete"
+    && agent.proof.fixture === false
+    && agent.proof.proven === true
+    && agent.proof.sourceHash === hash
+    && (agent.proof.tests ?? 0) >= 10
+    && agent.proof.winRate >= 0.7
+  ) {
+    return;
+  }
   const proof: ProofRecord = {
     id: randomUUID(),
     version: agent.version,
@@ -1142,6 +1153,7 @@ function queueProof(agent: AgentRecord, now: string): void {
     examples: [],
     costMinor: 0,
     capped: false,
+    sourceHash: hash,
   };
   agent.proof = proof;
 }

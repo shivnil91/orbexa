@@ -66,6 +66,66 @@ function freeze<T>(value: T): T {
   return value;
 }
 
+/** Field order is the hash canonical form. Verify rebuilds this same object. */
+export function packageBody(input: Omit<AgentPackage, "contentHash">): Omit<AgentPackage, "contentHash"> {
+  return {
+    id: input.id,
+    packageVersion: input.packageVersion,
+    createdAt: input.createdAt,
+    immutable: true,
+    kind: input.kind,
+    sellerId: input.sellerId,
+    slug: input.slug,
+    name: input.name,
+    specialty: input.specialty,
+    intake: input.intake,
+    rules: {
+      products: input.rules.products,
+      lenders: input.rules.lenders,
+      cells: input.rules.cells,
+    },
+    calculators: input.calculators,
+    playbooks: input.playbooks,
+    documents: input.documents,
+    templates: input.templates,
+    handoff: input.handoff,
+    tests: input.tests,
+    proof: input.proof,
+    routing: input.routing,
+    trainingConsent: input.trainingConsent === true,
+    exampleData: input.exampleData,
+    instructions: input.instructions,
+  };
+}
+
+export function packageContentHash(body: Omit<AgentPackage, "contentHash">): string {
+  return createHash("sha256").update(JSON.stringify(packageBody(body))).digest("hex");
+}
+
+/** True when the stored bytes still match the hash written at seal time. */
+export function verifyPackage(pack: AgentPackage | null | undefined): pack is AgentPackage {
+  if (!pack || pack.immutable !== true || typeof pack.contentHash !== "string" || !/^[a-f0-9]{64}$/.test(pack.contentHash)) return false;
+  if (pack.sellerId.trim().length === 0 || pack.slug.trim().length === 0) return false;
+  const { contentHash, ...rest } = pack;
+  return packageContentHash(rest) === contentHash;
+}
+
+export function configFromPackage(pack: AgentPackage): StudioConfig {
+  return {
+    exampleData: pack.exampleData,
+    specialty: pack.specialty,
+    intake: pack.intake,
+    products: pack.rules.products,
+    lenders: pack.rules.lenders,
+    cells: pack.rules.cells,
+    calculators: pack.calculators,
+    playbooks: pack.playbooks,
+    templates: pack.templates,
+    handoff: pack.handoff,
+    cases: pack.tests,
+  };
+}
+
 export function routingFrom(env: Record<string, string | undefined> = process.env): RoutingConfig {
   return {
     draftingModel: draftingModel(env),
@@ -82,7 +142,7 @@ export function sealPackage(input: PackageInput): AgentPackage {
     name,
     playbookId: playbook.id,
   })));
-  const draft: Omit<AgentPackage, "contentHash"> = {
+  const draft = packageBody({
     id: input.id,
     packageVersion: input.packageVersion,
     createdAt: input.createdAt ?? new Date().toISOString(),
@@ -105,8 +165,8 @@ export function sealPackage(input: PackageInput): AgentPackage {
     trainingConsent: input.trainingConsent === true,
     exampleData: config.exampleData,
     instructions: input.instructions,
-  };
-  const contentHash = createHash("sha256").update(JSON.stringify(draft)).digest("hex");
+  });
+  const contentHash = packageContentHash(draft);
   return freeze({ ...draft, contentHash });
 }
 
