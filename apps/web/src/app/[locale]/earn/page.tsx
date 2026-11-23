@@ -59,6 +59,7 @@ export default async function EarnPage({
         <p className="text-sm font-semibold text-muted">{t(locale, "earn.step", { step: draft ? "2" : "1" })}</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">{t(locale, "sell.title")}</h1>
         <p className="mt-3 text-lg leading-8">{t(locale, "sell.lede")}</p>
+        <p className="text-sm leading-6"><a className="underline" href={`/${locale}/studio`}>Build a specialist agent in Expert Agent Studio</a></p>
         {draft ? <EarningsSplit priceRaw={draft.priceRaw} note={t(locale, "earn.earnings")} /> : <p className="mt-4 text-sm leading-6">{t(locale, "earn.earnings")}</p>}
       </header>
       {error ? <Notice tone="error">{error}</Notice> : null}

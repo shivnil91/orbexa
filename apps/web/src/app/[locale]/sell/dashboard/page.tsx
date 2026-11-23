@@ -78,6 +78,7 @@ export default async function SellerDashboardPage({
       </section>
       <section>
         <h2 className="text-2xl font-semibold">{t(locale, "seller.listings")}</h2>
+        <p className="mt-2 text-sm"><Link className="underline" href={`/${locale}/studio`}>Open Expert Agent Studio</Link></p>
         {mine.length === 0 ? <p className="mt-3 text-sm text-muted">{t(locale, "sell.empty")}</p> : (
           <ul className="mt-3 grid gap-2">
             {mine.map((item) => (

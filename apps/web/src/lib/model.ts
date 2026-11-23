@@ -1,13 +1,17 @@
 import { sandboxReply } from "./marketplace.ts";
+import { routeTask } from "./model-router.ts";
 
-export const MODEL_TIMEOUT_MS = 20_000;
-export const MODEL_MAX_OUTPUT_TOKENS = 700;
-export const MODEL_MAX_INPUT_CHARS = 8_000;
-export const MODEL_MAX_OUTPUT_CHARS = 8_000;
-export const MODEL_MAX_COST_USD = 0.05;
-export const MODEL_HOURLY_CALLS = 30;
-export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
-export const OPENAI_MODEL = "gpt-4o-mini";
+export {
+  DEFAULT_ANTHROPIC_MODEL,
+  MODEL_HOURLY_CALLS,
+  MODEL_MAX_COST_USD,
+  MODEL_MAX_INPUT_CHARS,
+  MODEL_MAX_OUTPUT_CHARS,
+  MODEL_MAX_OUTPUT_TOKENS,
+  MODEL_TIMEOUT_MS,
+  OPENAI_MODEL,
+} from "./model-limits.ts";
+import { DEFAULT_ANTHROPIC_MODEL, MODEL_MAX_COST_USD, MODEL_MAX_OUTPUT_CHARS, MODEL_MAX_OUTPUT_TOKENS } from "./model-limits.ts";
 
 export const MODEL_POLICY = [
   "You write the deliverable a buyer paid for.",
@@ -77,32 +81,6 @@ export function draftPrompt(input: DraftRequest): { system: string; user: string
   return { system: MODEL_POLICY, user: parts.join("\n\n") };
 }
 
-const providerCallsAt: number[] = [];
-
-function providerCallAllowed(env: NodeJS.ProcessEnv): boolean {
-  const explicit = env.ORBEXA_MODEL_HOURLY_CAP;
-  const cap = explicit != null && explicit !== ""
-    ? Number(explicit)
-    : env.ORBEXA_ENV === "dev"
-      ? MODEL_HOURLY_CALLS
-      : null;
-  if (cap == null) {
-    return true;
-  }
-  if (!Number.isSafeInteger(cap) || cap < 0) {
-    return false;
-  }
-  const now = Date.now();
-  while (providerCallsAt.length > 0 && now - providerCallsAt[0] > 3_600_000) {
-    providerCallsAt.shift();
-  }
-  if (providerCallsAt.length >= cap) {
-    return false;
-  }
-  providerCallsAt.push(now);
-  return true;
-}
-
 export async function draftDeliverable(
   input: DraftRequest,
   env: NodeJS.ProcessEnv = process.env,
@@ -119,124 +97,23 @@ export async function draftDeliverable(
   if (rawChars > 20_000 || estimateDraftCost(prompt.system.length + prompt.user.length) > MODEL_MAX_COST_USD) {
     return { ok: false, error: "cap" };
   }
-  try {
-    let response: { text: string; inputTokens: number; outputTokens: number } | null = null;
-    let provider: "anthropic" | "openai" = "anthropic";
-    if (anthropicKey) {
-      if (!providerCallAllowed(env)) {
-        return { ok: false, error: "cap" };
-      }
-      try {
-        response = await callAnthropic(anthropicKey, anthropicModel(env), prompt.system, prompt.user, fetchImpl);
-      } catch (error) {
-        if (!openaiKey && isTimeout(error)) {
-          return { ok: false, error: "timeout" };
-        }
-        response = null;
-      }
-    }
-    if (!response && openaiKey) {
-      if (!providerCallAllowed(env)) {
-        return { ok: false, error: "cap" };
-      }
-      provider = "openai";
-      response = await callOpenAI(openaiKey, prompt.system, prompt.user, fetchImpl);
-    }
-    if (!response) {
-      return { ok: false, error: "provider" };
-    }
-    const spent = response.inputTokens * INPUT_USD_PER_TOKEN + response.outputTokens * OUTPUT_USD_PER_TOKEN;
-    if (spent > MODEL_MAX_COST_USD) {
-      return { ok: false, error: "cap" };
-    }
-    const paragraphs = response.text.slice(0, MODEL_MAX_OUTPUT_CHARS).split(/\n{2,}/).map((part) => part.trim()).filter((part) => part.length > 0);
-    if (paragraphs.length === 0) {
-      return { ok: false, error: "empty" };
-    }
-    return { ok: true, paragraphs, provider, inputTokens: response.inputTokens, outputTokens: response.outputTokens };
-  } catch (error) {
-    if (isTimeout(error)) {
-      return { ok: false, error: "timeout" };
-    }
-    return { ok: false, error: "provider" };
+  const routed = await routeTask({ task: "drafting", system: prompt.system, user: prompt.user, env, fetchImpl, budgeted: false });
+  if (!routed.ok) {
+    return { ok: false, error: routed.error === "empty" ? "provider" : routed.error };
   }
-}
-
-function isTimeout(error: unknown): boolean {
-  const name = error instanceof Error ? error.name : "";
-  return name === "TimeoutError" || name === "AbortError";
+  const spent = routed.inputTokens * INPUT_USD_PER_TOKEN + routed.outputTokens * OUTPUT_USD_PER_TOKEN;
+  if (spent > MODEL_MAX_COST_USD) {
+    return { ok: false, error: "cap" };
+  }
+  const paragraphs = routed.text.slice(0, MODEL_MAX_OUTPUT_CHARS).split(/\n{2,}/).map((part) => part.trim()).filter((part) => part.length > 0);
+  if (paragraphs.length === 0) {
+    return { ok: false, error: "empty" };
+  }
+  const provider = routed.provider === "openai" ? "openai" : "anthropic";
+  return { ok: true, paragraphs, provider, inputTokens: routed.inputTokens, outputTokens: routed.outputTokens };
 }
 
 async function defaultFetch(url: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) {
   const response = await fetch(url, init);
   return { ok: response.ok, status: response.status, json: () => response.json() as Promise<unknown> };
-}
-
-async function callAnthropic(key: string, model: string, system: string, need: string, fetchImpl: FetchLike) {
-  const response = await fetchImpl("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": key,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: MODEL_MAX_OUTPUT_TOKENS,
-      system,
-      messages: [{ role: "user", content: need }],
-    }),
-    signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    return null;
-  }
-  const body = await response.json() as {
-    content?: { type?: string; text?: string }[];
-    usage?: { input_tokens?: number; output_tokens?: number };
-  };
-  const text = (body.content ?? []).filter((block) => block.type === "text").map((block) => block.text ?? "").join("\n\n").trim();
-  if (!text) {
-    return null;
-  }
-  return {
-    text,
-    inputTokens: body.usage?.input_tokens ?? 0,
-    outputTokens: body.usage?.output_tokens ?? 0,
-  };
-}
-
-async function callOpenAI(key: string, system: string, need: string, fetchImpl: FetchLike) {
-  const response = await fetchImpl("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      max_tokens: MODEL_MAX_OUTPUT_TOKENS,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: need },
-      ],
-    }),
-    signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    return null;
-  }
-  const body = await response.json() as {
-    choices?: { message?: { content?: string } }[];
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
-  };
-  const text = (body.choices?.[0]?.message?.content ?? "").trim();
-  if (!text) {
-    return null;
-  }
-  return {
-    text,
-    inputTokens: body.usage?.prompt_tokens ?? 0,
-    outputTokens: body.usage?.completion_tokens ?? 0,
-  };
 }

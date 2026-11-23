@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { KnowledgeAsset, ProofExample, ProofRecord } from "./demo-store.ts";
 import { readDb, updateDb } from "./demo-store.ts";
+import { routerModelTransport } from "./model-router.ts";
 import { assertNoLiveStripeKey } from "./live-key.ts";
 import {
   JUDGE_SYSTEM,
@@ -553,7 +554,7 @@ export async function runStoredProof(slug: string, env: Record<string, string | 
       examples: gate.examples,
       version: gate.version,
       config,
-      transport: transport ?? (config.live ? anthropicTransport(config.key) : undefined),
+      transport: transport ?? (config.live ? routerModelTransport(env) : undefined),
     });
     await updateDb((current) => {
       const row = current.agents.find((item) => item.slug === slug);
