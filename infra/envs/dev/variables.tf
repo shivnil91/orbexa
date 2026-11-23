@@ -1,7 +1,7 @@
 variable "db_backup_retention_days" {
   type        = number
-  description = "Automated RDS backup retention in days. Free plan maximum is 1."
-  default     = 1
+  description = "Automated RDS backup retention in days. 7 enables point-in-time recovery. Free plan accounts may reject values above 1."
+  default     = 7
 }
 
 variable "budget_email" {

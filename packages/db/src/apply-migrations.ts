@@ -1,4 +1,6 @@
-import { loadMigrations } from "./migrations.ts";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { loadMigrations, migrationDir } from "./migrations.ts";
 
 const LOCK_KEY_A = 8726;
 const LOCK_KEY_B = 345110;
@@ -47,6 +49,37 @@ export async function applySchemaMigrations(client: MigrationClient): Promise<vo
         await client.query("ROLLBACK");
         throw error;
       }
+    }
+  } finally {
+    try {
+      await client.query("SELECT pg_advisory_unlock($1, $2)", [LOCK_KEY_A, LOCK_KEY_B]);
+    } catch {
+      // A dropped connection releases the session lock.
+    }
+  }
+}
+
+/**
+ * Reverse one applied migration. The down file is `<name without .sql>.down.sql`.
+ * The schema_migrations row is removed in the same transaction as the down SQL.
+ */
+export async function revertSchemaMigration(client: MigrationClient, name: string): Promise<void> {
+  if (!/^[0-9]{4}_[a-z0-9_]+\.sql$/.test(name)) {
+    throw new Error("migration name is invalid");
+  }
+  const downPath = path.join(migrationDir(), name.replace(/\.sql$/, ".down.sql"));
+  const sql = await readFile(downPath, "utf8");
+  await client.query("SELECT pg_advisory_lock($1, $2)", [LOCK_KEY_A, LOCK_KEY_B]);
+  try {
+    await client.query("BEGIN");
+    try {
+      await client.query(sql);
+      await client.query("DELETE FROM schema_migrations WHERE name = $1", [name]);
+      await client.query("COMMIT");
+      console.log(`reverted ${name}`);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
     }
   } finally {
     try {

@@ -4,6 +4,7 @@ import { routeAttemptCeilingCents, routeTask, routerModelTransport } from "./mod
 import { absentProof, listingConfig, sealPackage, verifyPackage, type AgentPackage } from "./package.ts";
 import { attachModelReasoning, plainStudioText, reportText, runStudio } from "./studio-run.ts";
 import type { StudioReport } from "./studio-types.ts";
+import { logEvent } from "./log.ts";
 import { fenceUntrusted, steersJudge } from "./trust.ts";
 
 /**
@@ -92,16 +93,29 @@ function baseResponse(request: ChannelRequest, extra: Partial<ChannelResponse>):
 
 export async function execute(request: ChannelRequest, env: Record<string, string | undefined> = process.env): Promise<ChannelResponse> {
   if (!verifyPackage(request.package)) {
-    return baseResponse(request, { error: "package" });
+    return finish(request, baseResponse(request, { error: "package" }));
   }
   if (request.sellerId !== request.package.sellerId) {
-    return baseResponse(request, { error: "isolation" });
+    return finish(request, baseResponse(request, { error: "isolation" }));
   }
   const client = await openClient(request.package.sellerId, request.clientId);
-  if (!client.ok) return baseResponse(request, { error: "isolation" });
+  if (!client.ok) return finish(request, baseResponse(request, { error: "isolation" }));
   const prior = await readClient(request.package.sellerId, request.clientId);
-  if (request.package.kind === "studio") return executeStudio(request, prior?.memory.map((item) => item.summary) ?? [], env);
-  return executeListing(request, prior?.memory.map((item) => item.summary) ?? [], env);
+  const response = request.package.kind === "studio"
+    ? await executeStudio(request, prior?.memory.map((item) => item.summary) ?? [], env)
+    : await executeListing(request, prior?.memory.map((item) => item.summary) ?? [], env);
+  return finish(request, response);
+}
+
+function finish(request: ChannelRequest, response: ChannelResponse): ChannelResponse {
+  logEvent({
+    event: "model_spend",
+    route: "runtime",
+    channel: request.channel,
+    costMinor: response.meter.costMinor,
+    calls: response.meter.calls,
+  });
+  return response;
 }
 
 async function executeListing(request: ChannelRequest, memory: string[], env: Record<string, string | undefined>): Promise<ChannelResponse> {

@@ -42,6 +42,17 @@ export const CATEGORIES = [
 
 export type CategoryCode = (typeof CATEGORIES)[number]["code"];
 
+export function exampleListingSeeds(): Array<{ id: string; slug: string; name: string; pitch: string; priceMinor: number; category: string }> {
+  return EXAMPLES.map((agent) => ({
+    id: `example-listing:${agent.slug}`,
+    slug: agent.slug,
+    name: agent.name,
+    pitch: agent.pitch,
+    priceMinor: agent.priceMinor,
+    category: agent.category,
+  }));
+}
+
 export function categoryLabel(code: string): string {
   return CATEGORIES.find((item) => item.code === code)?.label ?? code;
 }

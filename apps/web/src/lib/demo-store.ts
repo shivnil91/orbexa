@@ -250,7 +250,7 @@ function normalize(value: unknown): MarketplaceDb {
   };
 }
 
-export async function readDb(): Promise<MarketplaceDb> {
+export async function readJsonDb(): Promise<MarketplaceDb> {
   try {
     return normalize(JSON.parse(await readFile(dbPath(), "utf8")));
   } catch (error) {
@@ -259,6 +259,11 @@ export async function readDb(): Promise<MarketplaceDb> {
     }
     throw error;
   }
+}
+
+export async function readDb(): Promise<MarketplaceDb> {
+  const { getMarket } = await import("./repository.ts");
+  return getMarket().read();
 }
 
 let pending: Promise<unknown> = Promise.resolve();
@@ -272,9 +277,9 @@ export function withStoreLock<T>(work: () => Promise<T>): Promise<T> {
   return run;
 }
 
-export async function updateDb<T>(mutate: (db: MarketplaceDb) => T): Promise<T> {
+export async function updateJsonDb<T>(mutate: (db: MarketplaceDb) => T): Promise<T> {
   return withStoreLock(async () => {
-    const db = await readDb();
+    const db = await readJsonDb();
     const result = mutate(db);
     await mkdir(marketplaceDir(), { recursive: true });
     const file = dbPath();
@@ -284,4 +289,9 @@ export async function updateDb<T>(mutate: (db: MarketplaceDb) => T): Promise<T> 
     await rename(temporary, file);
     return result;
   });
+}
+
+export async function updateDb<T>(mutate: (db: MarketplaceDb) => T): Promise<T> {
+  const { getMarket } = await import("./repository.ts");
+  return getMarket().update(mutate);
 }

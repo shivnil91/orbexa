@@ -114,7 +114,7 @@ terraform plan -var-file=dev.tfvars -out=tfplan
 
 Read the plan. Apply only if all of these are true:
 
-- `aws_db_instance.postgres` is `db.t4g.micro`, `multi_az` false, `publicly_accessible` false, `backup_retention_period` 1, and `max_allocated_storage` 20.
+- `aws_db_instance.postgres` is `db.t4g.micro`, `multi_az` false, `publicly_accessible` false, `storage_encrypted` true, `backup_retention_period` 7, and `max_allocated_storage` 20.
 - There is no `aws_nat_gateway`, no `aws_eip`, and no `aws_lb`.
 - `aws_ecs_service.app` has `desired_count` 0.
 - The `aws_secretsmanager_secret` resources have no `aws_secretsmanager_secret_version`.
@@ -203,12 +203,12 @@ The database has deletion protection. To destroy the dev stack, set deletion pro
 The first apply can create the network, the secret shells, and the user pool, then stop. Before running apply again:
 
 1. In **IAM → Policies**, open `orbexa-dev-deployer-data`, choose **Edit**, replace the JSON with the current `infra/iam/orbexa-dev-deployer-data.json`, and save. The other two deployer policies did not change. The live policy is what the deployer uses. The file in git does not update it.
-2. In `dev.tfvars`, leave `db_backup_retention_days` at `1`.
+2. In `dev.tfvars`, leave `db_backup_retention_days` at `7` unless a previous apply was rejected for the free-plan backup limit.
 3. `terraform plan -var-file=dev.tfvars -out=tfplan`, then `terraform apply tfplan`.
 
 The plan should refresh the existing `orbexa/dev/*` secrets, create `aws_db_instance.postgres`, and update the Cognito user pool. It should not add a NAT gateway or a load balancer. If Cognito reports that `orbexa-dev` already exists and is not in state, delete that empty pool in the Cognito console and apply again.
 
-If RDS still returns `FreeTierRestrictionError` for the backup retention, set `db_backup_retention_days = 0` and apply again. That turns automated backups off. `0` is the only shorter value.
+If RDS still returns `FreeTierRestrictionError` for the backup retention, set `db_backup_retention_days = 1` and apply again. `1` is the free-plan maximum and still keeps point-in-time recovery for that day. `0` turns automated backups off; use it only if `1` is rejected. Restore steps are in [restore.md](restore.md).
 
 Free-plan limits checked against this stack, besides the backup retention:
 

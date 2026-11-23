@@ -1,7 +1,7 @@
 variable "db_backup_retention_days" {
   type        = number
-  description = "Automated RDS backup retention in days. The AWS Free plan maximum is 1. Set 0 only if 1 is still rejected."
-  default     = 1
+  description = "Automated RDS backup retention in days. 7 keeps point-in-time recovery for a week. The AWS Free plan maximum is 1; set 1 or 0 only if 7 is rejected."
+  default     = 7
 
   validation {
     condition     = var.db_backup_retention_days >= 0 && var.db_backup_retention_days <= 35

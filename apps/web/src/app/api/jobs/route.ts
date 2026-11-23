@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logEvent } from "@/lib/log";
 import type { ServiceLevel } from "@/lib/catalog";
 import { createJob, payJob } from "@/lib/jobs";
 import { getCatalog, isListingSlug } from "@/lib/marketplace";
@@ -9,6 +10,7 @@ import { currentUser } from "@/server/session";
 const LEVELS = new Set(["autonomous", "expert_verified", "expert_led", "expert_review"]);
 
 export async function POST(request: Request) {
+  const started = Date.now();
   const form = await request.formData();
   const locale = formLocale(form);
   const slug = String(form.get("slug") ?? "");
@@ -49,6 +51,7 @@ export async function POST(request: Request) {
         return redirectTo(request, `/${locale}/checkout`, { job: job.id, error: live ? "live" : "payment" });
       }
     }
+    logEvent({ event: "request", route: "hire", durationMs: Date.now() - started, status: 303 });
     return NextResponse.redirect(appUrl(request, `/${locale}/checkout?job=${job.id}`), 303);
   } catch {
     return redirectTo(request, `/${locale}/listings/${slug}/intake`, {

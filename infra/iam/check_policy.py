@@ -130,8 +130,10 @@ def main() -> int:
             errors.append(f"dev stack contains {banned}")
     for required in (
         "db.t4g.micro",
+        "storage_encrypted = true",
         "orbexa-dev-monthly-20",
         "orbexa-dev-monthly-50",
+        "orbexa-dev-db-cpu",
         "environment:dev",
         "ap-southeast-2",
         ACCOUNT,

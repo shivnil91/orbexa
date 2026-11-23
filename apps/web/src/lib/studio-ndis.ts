@@ -23,6 +23,10 @@ function cell(productId: string, lenderId: string, hard: Partial<HardRule>, soft
   return { productId, lenderId, hard: { ...emptyHard(), ...hard }, soft, softScore };
 }
 
+export function exampleIntakeAnswers(): Record<string, string> {
+  return { ...HEALTHY };
+}
+
 const HEALTHY: Record<string, string> = {
   q_provider: "SIL",
   q_registration: "registered",
