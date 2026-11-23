@@ -49,7 +49,9 @@ export default async function ReviewPage({
         <p className="mt-2 text-sm">{t(locale, "review.noTraining")}</p>
       </header>
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {query.saved ? <Notice tone="info">{t(locale, "review.saved")}</Notice> : null}
+      {query.saved === "1" ? <Notice tone="info">{t(locale, "review.saved")}</Notice> : null}
+      {query.saved === "revision" ? <Notice tone="info">{t(locale, "review.revision")}</Notice> : null}
+      {query.saved === "refund" || job.guarantee?.refundRequested ? <Notice>{t(locale, "review.refundPending")}</Notice> : null}
       <section>
         <h2 className="text-2xl font-semibold">{t(locale, "review.draft")}</h2>
         {job.paragraphs.map((paragraph) => (
@@ -70,7 +72,7 @@ export default async function ReviewPage({
           ))}
         </ul>
       </section> : null}
-      {allowMutate && job.status === "waiting_for_expert" ? (
+      {allowMutate && job.status === "waiting_for_expert" && job.serviceLevel !== "expert_review" ? (
         <form action={`/api/jobs/${job.id}/signal`} method="post" className="rounded-2xl border border-line bg-surface p-5">
           <input type="hidden" name="locale" value={locale} />
           <p className="text-sm leading-6 text-muted">{t(locale, "review.signal")}</p>
@@ -96,9 +98,14 @@ export default async function ReviewPage({
             </label>
             <button className="inline-flex min-h-11 items-center rounded-full border border-line px-4" type="submit">{t(locale, "review.edit")}</button>
           </form>
-          <form action={`/api/jobs/${job.id}/feedback`} method="post">
+          <form action={`/api/jobs/${job.id}/feedback`} method="post" className="grid gap-2">
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="kind" value="buyer_reject" />
+            <label className="grid gap-1 text-sm" htmlFor="rejectReason">
+              {t(locale, "review.rejectReason")}
+              <textarea className={`${inputClass} min-h-20 py-2`} id="rejectReason" minLength={8} name="reason" required />
+            </label>
+            <p className="text-sm text-muted">{t(locale, "review.guarantee")}</p>
             <button className="inline-flex min-h-11 items-center rounded-full border border-line px-4" type="submit">{t(locale, "review.reject")}</button>
           </form>
         </div>

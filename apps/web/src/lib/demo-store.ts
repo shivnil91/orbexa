@@ -11,6 +11,17 @@ export type ConnectState = {
   detailsSubmitted: boolean;
 };
 
+export type ProfileLink = { label: string; href: string };
+
+export type CredentialStatus = "self_declared" | "verified";
+
+export type CredentialRecord = {
+  id: string;
+  title: string;
+  issuer: string;
+  status: CredentialStatus;
+};
+
 export type UserRecord = {
   id: string;
   email: string;
@@ -22,6 +33,12 @@ export type UserRecord = {
   createdAt: string;
   connect: ConnectState;
   operator?: boolean;
+  experience?: string;
+  links?: ProfileLink[];
+  credentials?: CredentialRecord[];
+  trainingConsent?: boolean;
+  photoDataUrl?: string;
+  proofRuns?: string[];
 };
 
 export type SessionRecord = {
@@ -31,6 +48,70 @@ export type SessionRecord = {
 };
 
 export type KnowledgeNote = { name: string; text: string };
+
+export type AssetKind = "template" | "checklist" | "example" | "rule";
+
+export type KnowledgeAsset = {
+  id: string;
+  kind: AssetKind;
+  name: string;
+  text: string;
+};
+
+export type InterviewAnswer = { questionId: string; answer: string };
+
+export type ExpertReviewConfig = {
+  enabled: boolean;
+  priceMinor: number;
+  slaHours: number;
+};
+
+export type ProofTaskSource = "held_out" | "category" | "expert_fact" | "seller_example";
+
+export type ProofExample = {
+  task: string;
+  source: ProofTaskSource;
+  agentOutput: string;
+  baselineOutput: string;
+  winner: "agent" | "baseline" | "tie";
+  agentScore: number;
+  baselineScore: number;
+};
+
+export type ProofOutcome = {
+  task: string;
+  source: ProofTaskSource;
+  winner: "agent" | "baseline" | "tie";
+  flagged?: boolean;
+};
+
+export type ProofRecord = {
+  id: string;
+  version: number;
+  status: "queued" | "running" | "complete" | "failed";
+  startedAt: string;
+  finishedAt: string | null;
+  model: string;
+  judgeModel: string;
+  fixture: boolean;
+  tests: number;
+  wins: number;
+  ties: number;
+  losses: number;
+  winRate: number;
+  proven: boolean;
+  categoryTests?: number;
+  categoryWins?: number;
+  expertTests?: number;
+  expertWins?: number;
+  judgeUnparsed?: number;
+  rubric: { code: string; agent: number; baseline: number }[];
+  examples: ProofExample[];
+  outcomes?: ProofOutcome[];
+  costMinor: number;
+  capped: boolean;
+  error?: string;
+};
 
 export type AgentRecord = {
   id: string;
@@ -42,6 +123,13 @@ export type AgentRecord = {
   category: string;
   instructions: string;
   knowledge: KnowledgeNote[];
+  assets?: KnowledgeAsset[];
+  interview?: InterviewAnswer[];
+  trainingConsent?: boolean;
+  expertReview?: ExpertReviewConfig;
+  version?: number;
+  contentHash?: string;
+  proof?: ProofRecord | null;
   exampleOutputs: { title: string; body: string }[];
   priceMinor: number;
   currency: "USD";
@@ -70,6 +158,15 @@ export type SearchRecord = {
   createdAt: string;
 };
 
+export type AuditEvent = {
+  id: string;
+  at: string;
+  actorId: string;
+  action: "credential_verify" | "refund_approve";
+  targetId: string;
+  detail: string;
+};
+
 export type MarketplaceDb = {
   users: UserRecord[];
   sessions: SessionRecord[];
@@ -77,6 +174,7 @@ export type MarketplaceDb = {
   reviews: ReviewRecord[];
   searches: SearchRecord[];
   overrides: Record<string, "suspended" | "rejected">;
+  audit?: AuditEvent[];
 };
 
 export function emptyConnect(): ConnectState {
@@ -84,7 +182,7 @@ export function emptyConnect(): ConnectState {
 }
 
 export function emptyDb(): MarketplaceDb {
-  return { users: [], sessions: [], agents: [], reviews: [], searches: [], overrides: {} };
+  return { users: [], sessions: [], agents: [], reviews: [], searches: [], overrides: {}, audit: [] };
 }
 
 export function marketplaceDir(): string {
@@ -108,6 +206,7 @@ function normalize(value: unknown): MarketplaceDb {
     reviews: Array.isArray(record.reviews) ? record.reviews : [],
     searches: Array.isArray(record.searches) ? record.searches : [],
     overrides: record.overrides && typeof record.overrides === "object" && !Array.isArray(record.overrides) ? record.overrides : {},
+    audit: Array.isArray(record.audit) ? record.audit : [],
   };
 }
 

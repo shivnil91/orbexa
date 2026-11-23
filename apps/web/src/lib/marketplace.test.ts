@@ -148,13 +148,47 @@ test("publish validation rejects a short instruction and accepts a complete agen
     exampleTitle: "Sample",
     exampleBody: "LC2 is not in the brief. No load was invented.",
     priceRaw: "40",
+    interview: [
+      { questionId: "good", answer: "Name each missing load case and leave the number blank." },
+      { questionId: "never", answer: "Never invent a measurement or a certificate." },
+      { questionId: "first", answer: "Look at the named cases first and ignore a guessed total." },
+      { questionId: "mistake", answer: "A general model fills a gap with a plausible number." },
+      { questionId: "incomplete", answer: "When the brief is incomplete, mark the item missing." },
+    ],
   };
   assert.equal(validateAgent({ ...input, instructions: "too short" }, "publish").ok, false);
   const saved = validateAgent(input, "publish");
   assert.equal(saved.ok, true);
-  if (saved.ok) {
+    if (saved.ok) {
     assert.equal(saved.value.priceMinor, 4000);
+    const reviewed = validateAgent({ ...input, expertReview: { enabled: true, priceMinor: 100, slaHours: 24 } }, "publish");
+    assert.equal(reviewed.ok, true);
+    if (reviewed.ok && reviewed.value.expertReview) {
+      assert.ok(reviewed.value.expertReview.priceMinor > 4000);
+      assert.notEqual(reviewed.value.expertReview.priceMinor, 100);
+      assert.equal(reviewed.value.expertReview.slaHours, 24);
+    } else {
+      assert.fail("expert review price was not clamped");
+    }
+    const inflated = validateAgent({ ...input, expertReview: { enabled: true, priceMinor: Number.POSITIVE_INFINITY, slaHours: 1 } }, "publish");
+    assert.equal(inflated.ok, true);
+    if (inflated.ok && inflated.value.expertReview) {
+      assert.ok(inflated.value.expertReview.priceMinor <= 500_000);
+      assert.equal(inflated.value.expertReview.slaHours, 48);
+    } else {
+      assert.fail("expert review price was not capped");
+    }
   }
+  const thin = validateAgent({
+    ...input,
+    interview: [
+      { questionId: "good", answer: "aaaaaaaa" },
+      { questionId: "never", answer: "bbbbbbbb" },
+      { questionId: "first", answer: "cccccccc" },
+      { questionId: "mistake", answer: "dddddddd" },
+    ],
+  }, "publish");
+  assert.equal(thin.ok, false);
 });
 
 test("open redirects are refused", () => {
@@ -172,6 +206,11 @@ test("accepted earnings sum only this seller's accepted orders", () => {
     { sellerId: "seller", listingSlug: "a", status: "accepted", creatorRoyaltyMinor: 500, refunded: true },
   ], "seller", ["a"]);
   assert.equal(total, 3200);
+  const crossed = acceptedEarnings([
+    { sellerId: "other", listingSlug: "a", status: "accepted", creatorRoyaltyMinor: 900 },
+    { sellerId: "seller", listingSlug: "a", status: "accepted", creatorRoyaltyMinor: 3200 },
+  ], "seller", ["a"]);
+  assert.equal(crossed, 3200);
 });
 
 describe("accounts and connect", { concurrency: false }, () => {
@@ -223,6 +262,11 @@ describe("accounts and connect", { concurrency: false }, () => {
       role: "seller",
       admin: false,
       connect: { mode: "simulated", accountId: null, chargesEnabled: false, detailsSubmitted: false },
+      experience: "",
+      links: [],
+      credentials: [],
+      trainingConsent: false,
+      photoDataUrl: "",
     };
     let calls = 0;
     const simulated = await beginConnectOnboarding({

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { AgentForm } from "@/components/agent-form";
 import { Notice } from "@/components/notice";
+import { ProofCoach } from "@/components/proof-coach";
 import { pageClass } from "@/components/styles";
 import { messageFor, t } from "@/lib/i18n";
 import { isSupportedLocale } from "@/lib/locale";
@@ -35,6 +36,7 @@ export default async function EditAgentPage({
         <p className="mt-2 text-sm text-muted">{t(locale, "sell.status")}: {item.status}</p>
       </header>
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {item.proof?.status === "complete" ? <ProofCoach locale={locale} proof={item.proof} slug={item.slug} /> : null}
       <AgentForm item={item} locale={locale} />
     </main>
   );

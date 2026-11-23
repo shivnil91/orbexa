@@ -28,7 +28,9 @@ test("seller publishes, buyer hires, and admin can hide the listing", async ({ p
   const skill = `Load checker ${stamp} flags missing bridge load cases`;
 
   await page.goto("/en");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Get expert work done by AI agents built by real experts, from $15, in minutes.");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Expert know-how, packaged as AI you can trust.");
+  await expect(page.getByRole("heading", { name: "Why not just ask ChatGPT?" })).toBeVisible();
+  await expect(page.getByText("Get expert work done by AI agents built by real experts, from $15, in minutes.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Get something done" }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Earn from your skills" }).first()).toBeVisible();
   await noOverflow(page);
@@ -55,6 +57,10 @@ test("seller publishes, buyer hires, and admin can hide the listing", async ({ p
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(skill);
   await expect(page.getByText("You are live.")).toBeVisible();
 
+  await expect(page.getByRole("heading", { name: "Orbexa Proof" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Orbexa Guarantee" })).toBeVisible();
+  await expect(page.getByText("No credential on file.")).toBeVisible();
+  await expect(page.getByText("Backed by Seller Example")).toBeVisible();
   await page.goto(`/en/listings?q=${encodeURIComponent(stamp)}`);
   await expect(page.getByRole("heading", { name: skill })).toBeVisible();
   await signOut(page);
@@ -69,6 +75,8 @@ test("seller publishes, buyer hires, and admin can hide the listing", async ({ p
   await page.goto(`/en/get?need=${encodeURIComponent(skill)}`);
   const match = page.getByRole("article").filter({ hasText: skill });
   await expect(match.getByRole("heading", { level: 2, name: skill })).toBeVisible();
+  await expect(match.getByText(/Proof running|Beats plain AI|Not proven/)).toBeVisible();
+  await expect(page.getByText("Ranked by how well the job fits, then by proof against plain AI, then by paid work.")).toBeVisible();
   await page.screenshot({ path: `/opt/cursor/artifacts/search-results-${info.project.name}.png`, fullPage: true });
   await match.getByRole("button", { name: /Pay .* and get this/ }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Your draft" })).toBeVisible();

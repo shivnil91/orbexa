@@ -43,7 +43,11 @@ export function sellerOrders<T extends { sellerId?: string; listingSlug: string 
   slugs: string[],
 ): T[] {
   const owned = new Set(slugs);
-  return jobs.filter((job) => job.sellerId === sellerId || owned.has(job.listingSlug));
+  return jobs.filter((job) => job.sellerId === sellerId && owned.has(job.listingSlug));
+}
+
+export function canReviewAsSeller(job: { sellerId?: string; serviceLevel?: string }, sellerId: string): boolean {
+  return sellerId.length > 0 && job.sellerId === sellerId && job.serviceLevel === "expert_review";
 }
 
 export type OrderSummary = {

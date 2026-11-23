@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from orbexa_ai.ingest import Chunk
 from orbexa_ai.limits import RunBudget
+from orbexa_ai.safety import wrap_untrusted_document
 
 
 class ProviderError(RuntimeError):
@@ -53,7 +54,7 @@ def urllib_transport(
 
 def _document(chunks: list[Chunk]) -> str:
     parts = [f"{chunk.document_name}: {chunk.body}" for chunk in chunks]
-    return "<untrusted_document>\n" + "\n".join(parts) + "\n</untrusted_document>"
+    return wrap_untrusted_document("\n".join(parts))
 
 
 def _instruction(task: str) -> str:
@@ -161,10 +162,28 @@ def _usage(provider: str, parsed: dict[str, Any]) -> tuple[int, int]:
     return (int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0))
 
 
+def anthropic_text(content: object) -> str:
+    """Join text blocks. A thinking block may come first and is not the draft."""
+    if not isinstance(content, list) or not content:
+        raise ProviderError("model content was not a list")
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") != "text":
+            continue
+        text = block.get("text")
+        if isinstance(text, str):
+            parts.append(text)
+    if not parts:
+        raise ProviderError("model content was not text")
+    return "\n".join(parts)
+
+
 def _parse_completion(provider: str, body: str) -> dict[str, Any]:
     parsed = json.loads(body)
     if provider == "anthropic":
-        text = parsed["content"][0]["text"]
+        text = anthropic_text(parsed["content"])
     else:
         text = parsed["choices"][0]["message"]["content"]
     if not isinstance(text, str):

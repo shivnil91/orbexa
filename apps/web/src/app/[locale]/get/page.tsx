@@ -53,6 +53,8 @@ export default async function GetPage({
               <Link className="mt-4 inline-flex min-h-12 items-center text-base font-semibold underline" href={`/${locale}/get`}>{t(locale, "get.change")}</Link>
             </div>
           ) : (
+            <>
+            <p className="text-sm leading-6 text-muted">{t(locale, "get.ranked")}</p>
             <ol className="grid gap-4">
               {matches.map((match, index) => {
                 const price = formatMoney(BigInt(match.item.priceMinor), match.item.currency, locale);
@@ -69,6 +71,16 @@ export default async function GetPage({
                       <p className="text-sm font-medium text-muted">{index + 1}{match.item.example ? ` · ${t(locale, "card.example")}` : ""}</p>
                       <h2 className="text-2xl font-semibold">{match.item.name}</h2>
                       <p className="text-2xl font-semibold">{price}</p>
+                      {match.item.proof?.status === "complete" ? (
+                        <p className="text-sm font-medium">
+                          <span className={`rounded-full px-2 py-0.5 ${match.item.proof.proven ? "bg-supported-bg text-supported" : "bg-warning-bg text-warning"}`}>
+                            {match.item.proof.proven ? t(locale, "card.proof") : t(locale, "card.notProven")}
+                          </span>
+                          {" "}
+                          {t(locale, "card.beats", { wins: String(match.item.proof.wins), tests: String(match.item.proof.tests) })}
+                        </p>
+                      ) : null}
+                      {match.item.proof?.status === "queued" || match.item.proof?.status === "running" ? <p className="text-sm font-medium">{t(locale, "card.proofRunning")}</p> : null}
                       <p className="font-medium">{t(locale, "home.turnaround")}</p>
                       <p className="text-sm">{rating}</p>
                       {sample ? (
@@ -90,6 +102,7 @@ export default async function GetPage({
                 );
               })}
             </ol>
+            </>
           )}
         </section>
       )}

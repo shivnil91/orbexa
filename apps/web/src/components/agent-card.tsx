@@ -4,6 +4,16 @@ import { t } from "@/lib/i18n";
 import type { CatalogItem } from "@/lib/marketplace";
 import { initials, JobMark, laneForCategory } from "./job-mark";
 
+function proofLine(locale: string, item: CatalogItem): string | null {
+  const proof = item.proof;
+  if (!proof) return null;
+  if (proof.status === "queued" || proof.status === "running") return t(locale, "card.proofRunning");
+  if (proof.status !== "complete") return null;
+  const score = t(locale, "card.beats", { wins: String(proof.wins), tests: String(proof.tests) });
+  const badge = proof.proven ? t(locale, "card.proof") : t(locale, "card.notProven");
+  return `${badge} · ${score}`;
+}
+
 export function AgentCard({ locale, item }: { locale: string; item: CatalogItem }) {
   const price = formatMoney(BigInt(item.priceMinor), item.currency, locale);
   const rating = item.ratingCount === 0
@@ -13,6 +23,7 @@ export function AgentCard({ locale, item }: { locale: string; item: CatalogItem 
         count: String(item.ratingCount),
       });
   const lane = laneForCategory(item.category);
+  const proof = proofLine(locale, item);
   return (
     <article className="flex h-full min-w-0 flex-col rounded-3xl border border-line bg-surface p-4 shadow-sm">
       <div className="flex items-start gap-3">
@@ -28,6 +39,7 @@ export function AgentCard({ locale, item }: { locale: string; item: CatalogItem 
       <h3 className="mt-4 font-display text-xl font-semibold leading-6">
         <Link className="underline decoration-transparent underline-offset-4 hover:decoration-current" href={`/${locale}/get?need=${encodeURIComponent(item.pitch)}`}>{item.name}</Link>
       </h3>
+      {proof ? <p className="mt-2 text-sm font-medium">{proof}</p> : null}
       <p className="mt-2 text-sm leading-6">{item.pitch}</p>
       <div className="mt-auto flex items-center gap-2 pt-4">
         <span className="inline-flex size-8 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground" aria-hidden="true">{initials(item.sellerName)}</span>

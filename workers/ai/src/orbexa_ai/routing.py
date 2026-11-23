@@ -96,13 +96,24 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+# Cents per million tokens. Not a vendor invoice. Ratios follow the public Claude list.
+_MODEL_RATES = (
+    ("haiku", 100, 500),
+    ("sonnet", 300, 1500),
+    ("opus", 1500, 7500),
+)
+
+
 def cost_minor_for(model: str, input_tokens: int, output_tokens: int, *, cache_hit: bool) -> int:
-    """A non-zero fixture estimate so a run has a cost. This is not a vendor invoice."""
+    """Fixture calls cost 1. Live calls use the model rate table, at least 1 cent."""
     if cache_hit:
         return 0
     if model == "fixture":
         return 1
-    return max(1, (input_tokens + output_tokens) // 1000)
+    key = model.lower()
+    rate = next((row for row in _MODEL_RATES if row[0] in key), _MODEL_RATES[1])
+    cents = (max(0, input_tokens) * rate[1] + max(0, output_tokens) * rate[2]) / 1_000_000
+    return max(1, int(cents + 0.999999))
 
 
 def _tokens(gateway: LlmGateway, prompt: str, result: dict[str, object]) -> tuple[int, int]:

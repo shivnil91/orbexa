@@ -50,6 +50,8 @@ export default async function LocaleHome({
         <p className="text-sm font-semibold uppercase tracking-[0.16em] text-accent">{t(locale, "home.eyebrow")}</p>
         <h1 className="mt-3 text-4xl font-semibold leading-tight tracking-tight sm:text-6xl">{t(locale, "home.title")}</h1>
         <p className="mt-4 text-lg leading-8">{t(locale, "home.lede")}</p>
+        <p className="mt-3 text-lg leading-8">{t(locale, "home.promise")}</p>
+        <p className="mt-2 leading-7">{t(locale, "home.sellerLine")}</p>
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
           <Link className={primaryButton} href={`/${locale}/get`}>{t(locale, "home.buyerDoor")}</Link>
           <Link className={secondaryButton} href={`/${locale}/earn`}>{t(locale, "home.sellerDoor")}</Link>
@@ -66,6 +68,23 @@ export default async function LocaleHome({
             </li>
           ))}
         </ol>
+      </section>
+      <section className="grid gap-4" aria-labelledby="why-title">
+        <h2 id="why-title" className="text-2xl font-semibold">{t(locale, "home.whyTitle")}</h2>
+        <p className="max-w-3xl leading-7 text-muted">{t(locale, "home.whyBody")}</p>
+        <p className="text-sm text-muted">{t(locale, "home.whyExample")}</p>
+      </section>
+      <section aria-labelledby="beach-title">
+        <h2 id="beach-title" className="text-2xl font-semibold">{t(locale, "home.beachTitle")}</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">{t(locale, "home.beachBody")}</p>
+        <ul className="mt-4 grid gap-3 lg:grid-cols-3">
+          {(["home.beach1", "home.beach2", "home.beach3"] as const).map((key) => (
+            <li key={key} className="rounded-2xl border border-line bg-surface p-4">
+              <h3 className="font-medium">{t(locale, `${key}.title`)}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted">{t(locale, `${key}.body`)}</p>
+            </li>
+          ))}
+        </ul>
       </section>
       <section>
         <div className="flex items-end justify-between gap-3">

@@ -35,7 +35,7 @@ export default async function AccountPage({
       </header>
       {error ? <Notice tone="error">{error}</Notice> : null}
       {query.saved ? <Notice tone="info">{t(locale, "auth.save")}</Notice> : null}
-      <form action="/api/account" className="grid gap-4 rounded-2xl border border-line bg-surface p-5" method="post">
+      <form action="/api/account" className="grid gap-4 rounded-2xl border border-line bg-surface p-5" encType="multipart/form-data" method="post">
         <input name="locale" type="hidden" value={locale} />
         <label className="grid gap-2 text-sm font-medium" htmlFor="name">
           {t(locale, "auth.name")}
@@ -44,6 +44,52 @@ export default async function AccountPage({
         <label className="grid gap-2 text-sm font-medium" htmlFor="bio">
           {t(locale, "auth.bio")}
           <textarea className={`${inputClass} min-h-24 py-2`} defaultValue={user.bio} id="bio" name="bio" maxLength={500} />
+        </label>
+        <label className="grid gap-2 text-sm font-medium" htmlFor="experience">
+          {t(locale, "auth.experience")}
+          <textarea className={`${inputClass} min-h-24 py-2`} defaultValue={user.experience} id="experience" name="experience" maxLength={400} />
+        </label>
+        <label className="grid gap-2 text-sm font-medium" htmlFor="photo">
+          {t(locale, "auth.photo")}
+          <input accept="image/png,image/jpeg,image/webp" className="min-h-11 text-sm" id="photo" name="photo" type="file" />
+        </label>
+        <fieldset className="grid gap-3">
+          <legend className="text-sm font-medium">{t(locale, "auth.links")}</legend>
+          {[1, 2, 3].map((index) => (
+            <div key={index} className="grid gap-2 sm:grid-cols-2">
+              <label className="grid gap-1 text-sm" htmlFor={`linkLabel${index}`}>
+                {t(locale, "auth.linkLabel")} {index}
+                <input className={inputClass} defaultValue={user.links[index - 1]?.label ?? ""} id={`linkLabel${index}`} name={`linkLabel${index}`} />
+              </label>
+              <label className="grid gap-1 text-sm" htmlFor={`linkUrl${index}`}>
+                {t(locale, "auth.linkUrl")} {index}
+                <input className={inputClass} defaultValue={user.links[index - 1]?.href ?? ""} id={`linkUrl${index}`} name={`linkUrl${index}`} inputMode="url" />
+              </label>
+            </div>
+          ))}
+        </fieldset>
+        <fieldset className="grid gap-3">
+          <legend className="text-sm font-medium">{t(locale, "auth.credential")}</legend>
+          <p className="text-sm leading-6 text-muted">{t(locale, "auth.credentialNote")}</p>
+          {user.credentials.length > 0 ? (
+            <ul className="grid gap-1 text-sm">
+              {user.credentials.map((credential) => (
+                <li key={credential.id}>{credential.title} · {credential.issuer} · {credential.status === "verified" ? t(locale, "listing.verifiedCredential") : t(locale, "listing.selfDeclared")}</li>
+              ))}
+            </ul>
+          ) : null}
+          <label className="grid gap-1 text-sm" htmlFor="credentialTitle">
+            {t(locale, "auth.credentialTitle")}
+            <input className={inputClass} id="credentialTitle" name="credentialTitle" maxLength={80} />
+          </label>
+          <label className="grid gap-1 text-sm" htmlFor="credentialIssuer">
+            {t(locale, "auth.credentialIssuer")}
+            <input className={inputClass} id="credentialIssuer" name="credentialIssuer" maxLength={80} />
+          </label>
+        </fieldset>
+        <label className="flex min-h-11 items-start gap-3 text-sm leading-6" htmlFor="trainingConsent">
+          <input className="mt-1 size-5" defaultChecked={user.trainingConsent} id="trainingConsent" name="trainingConsent" type="checkbox" value="yes" />
+          <span>{t(locale, "auth.training")}</span>
         </label>
         <fieldset className="grid gap-2">
           <legend className="text-sm font-medium">{t(locale, "auth.role")}</legend>

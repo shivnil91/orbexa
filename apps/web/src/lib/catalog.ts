@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-export type ServiceLevel = "autonomous" | "expert_verified" | "expert_led";
+export type ServiceLevel = "autonomous" | "expert_verified" | "expert_led" | "expert_review";
 
 export type IntakeSchema = {
   type: "object";
@@ -21,6 +21,7 @@ export type Tier = {
   includedRevisions: number;
   cancellationCode: string;
   payoutRelease: "on_acceptance" | "after_dispute_window";
+  slaHours?: number;
 };
 
 export type Listing = {
@@ -35,6 +36,7 @@ export type Listing = {
   tiers: Tier[];
   instructions?: string;
   knowledge?: { name: string; text: string }[];
+  assets?: { id: string; kind: "template" | "checklist" | "example" | "rule"; name: string; text: string }[];
   sellerId?: string;
 };
 

@@ -4,9 +4,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, test } from "node:test";
+import { registerAccount } from "./accounts.ts";
+import { sellerOrders } from "./job-access.ts";
 import {
   applyVerifiedStripePayment,
   applyVerifiedStripeRefund,
+  approveReviewedRefund,
   createJob,
   deliverPaidDraft,
   MODEL_MAX_ATTEMPTS,
@@ -16,9 +19,12 @@ import {
   recordExpertSignal,
   recordJobFeedback,
   refundUnreleasedJob,
+  releaseExpertReview,
   revealNext,
+  saveExpertDraft,
   setJobConsent,
 } from "./jobs.ts";
+import { saveAgent } from "./marketplace.ts";
 import { verifyStripeTestWebhook } from "./payments.ts";
 
 describe("job payments", { concurrency: false }, () => {
@@ -467,6 +473,139 @@ test("a model-backed job waits for the provider and refunds when it fails", asyn
     await rm(directory, { recursive: true, force: true });
   }
 });
+test("a reasoned rejection revises once, then a reviewed refund is idempotent", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-guarantee-"));
+  process.env.ORBEXA_JOB_DIR = directory;
+  try {
+    const job = await createJob({
+      locale: "en",
+      slug: "example-drawing-check",
+      tier: "autonomous",
+      intake: { need: "Check the drawing for a missing dimension" },
+      tenantId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    });
+    const paid = await payJob(job.id);
+    let current = paid;
+    while (current.status === "queued" || current.status === "running") {
+      current = await revealNext(current.id);
+    }
+    assert.equal(current.status, "waiting_for_buyer");
+    assert.equal(current.paragraphs.join("\n").includes("must be named"), false);
+    await assert.rejects(recordJobFeedback(job.id, { kind: "buyer_reject", reason: "short" }), /reason/);
+    const revised = await recordJobFeedback(job.id, { kind: "buyer_reject", reason: "The gap I asked about is still missing." });
+    assert.equal(revised.status, "waiting_for_buyer");
+    assert.equal(revised.guarantee?.revisionUsed, true);
+    assert.match(revised.paragraphs[0] ?? "", /free revision/);
+    const review = await recordJobFeedback(job.id, { kind: "buyer_reject", reason: "The revision still misses the dimension." });
+    assert.equal(review.guarantee?.refundRequested, true);
+    assert.equal(review.refunded, undefined);
+    await assert.rejects(recordJobFeedback(job.id, { kind: "buyer_approve" }), /review/);
+    await assert.rejects(approveReviewedRefund(job.id, { admin: false }), /forbidden/);
+    const refunded = await approveReviewedRefund(job.id, { admin: true });
+    assert.equal(refunded.refunded, true);
+    assert.equal(refunded.status, "rejected");
+    const replay = await approveReviewedRefund(job.id, { admin: true });
+    assert.equal(replay.processedStripeEvents.filter((id) => id.startsWith("guarantee_refund_")).length, 1);
+    await assert.rejects(approveReviewedRefund(job.id, { admin: true }, { STRIPE_SECRET_KEY: "sk_live_nope" }), /live Stripe/);
+    const shared = await createJob({
+      locale: "en",
+      slug: "example-drawing-check",
+      tier: "autonomous",
+      intake: { need: "Check the drawing for a missing dimension" },
+    });
+    let anon = await payJob(shared.id);
+    while (anon.status === "queued" || anon.status === "running") anon = await revealNext(anon.id);
+    anon = await recordJobFeedback(anon.id, { kind: "buyer_reject", reason: "The first note is still missing from the draft." });
+    assert.equal(anon.guarantee?.revisionUsed, true);
+    anon = await recordJobFeedback(anon.id, { kind: "buyer_reject", reason: "The shared demo order must not enter the refund queue." });
+    assert.equal(anon.guarantee?.refundRequested, false);
+    await assert.rejects(approveReviewedRefund(shared.id, { admin: true }), /not in review|closed/);
+  } finally {
+    delete process.env.ORBEXA_JOB_DIR;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+test("an accepted order cannot be refunded, and a seller cannot open another seller's review", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-guarantee-closed-"));
+  const previous = { jobs: process.env.ORBEXA_JOB_DIR, demo: process.env.ORBEXA_DEMO_DIR };
+  process.env.ORBEXA_JOB_DIR = directory;
+  process.env.ORBEXA_DEMO_DIR = directory;
+  const sellerId = "11111111-1111-4111-8111-111111111111";
+  const buyerId = "22222222-2222-4222-8222-222222222222";
+  const otherSeller = "33333333-3333-4333-8333-333333333333";
+  try {
+    const created = await registerAccount({ name: "Seller", email: "seller-guarantee@example.com", password: "correct-horse", role: "seller" });
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const input = {
+      name: "Load checker",
+      pitch: "Flag missing bridge load cases",
+      description: "Looks for missing load combinations in a short brief.",
+      category: "engineering",
+      instructions: "Flag missing load cases and do not invent numbers.",
+      knowledge: [],
+      exampleTitle: "Sample",
+      exampleBody: "LC2 is missing from the brief.",
+      priceRaw: "40",
+      expertReview: { enabled: true, priceMinor: 100, slaHours: 24 as const },
+      interview: [
+        { questionId: "good", answer: "Name each missing load case and leave the number blank." },
+        { questionId: "never", answer: "Never invent a measurement or a certificate." },
+        { questionId: "first", answer: "Look at the named cases first and ignore a guessed total." },
+        { questionId: "mistake", answer: "A general model fills a gap with a plausible number." },
+        { questionId: "incomplete", answer: "When the brief is incomplete, mark the item missing." },
+      ],
+    };
+    const saved = await saveAgent(created.user.id, input, "publish");
+    assert.equal(saved.ok, true);
+    if (!saved.ok) return;
+    const acceptedJob = await createJob({
+      locale: "en",
+      slug: saved.slug,
+      tier: "autonomous",
+      intake: { need: "Check the drawing for a missing dimension" },
+      tenantId: buyerId,
+    });
+    assert.ok(acceptedJob.priceMinor >= 4000);
+    let current = await payJob(acceptedJob.id);
+    while (current.status === "queued" || current.status === "running") current = await revealNext(current.id);
+    current = await recordJobFeedback(current.id, { kind: "buyer_approve" });
+    assert.equal(current.status, "accepted");
+    const rejected = await recordJobFeedback(current.id, { kind: "buyer_reject", reason: "I changed my mind after accepting it." });
+    assert.equal(rejected.guarantee?.refundRequested, undefined);
+    await assert.rejects(approveReviewedRefund(current.id, { admin: true }), /not in review/);
+
+    const reviewJob = await createJob({
+      locale: "en",
+      slug: saved.slug,
+      tier: "expert_review",
+      intake: { need: "Buyer private brief about a bridge load case" },
+      tenantId: buyerId,
+    });
+    assert.ok(reviewJob.priceMinor > 4000);
+    assert.notEqual(reviewJob.priceMinor, 100);
+    let expert = await payJob(reviewJob.id);
+    while (expert.status === "queued" || expert.status === "running") expert = await revealNext(expert.id);
+    assert.equal(expert.status, "waiting_for_expert");
+    assert.equal(expert.sellerId, created.user.id);
+    assert.notEqual(created.user.id, sellerId);
+    await assert.rejects(saveExpertDraft(expert.id, otherSeller, "A draft the other seller should not be able to save here."), /not available/);
+    await assert.rejects(releaseExpertReview(expert.id, otherSeller), /not available/);
+    const jobs = [acceptedJob, reviewJob].map((job) => ({ ...job, sellerId: job.sellerId }));
+    assert.deepEqual(sellerOrders(jobs, otherSeller, [saved.slug]).map((job) => job.id), []);
+    assert.deepEqual(sellerOrders(jobs, created.user.id, [saved.slug]).map((job) => job.id).sort(), [acceptedJob.id, reviewJob.id].sort());
+    const draft = await saveExpertDraft(expert.id, created.user.id, "The load case is missing.\n\nNo number was added.");
+    assert.equal(draft.paragraphs.length, 2);
+    assert.equal(draft.paragraphs.join("\n").includes("Buyer private brief"), false);
+  } finally {
+    if (previous.jobs === undefined) delete process.env.ORBEXA_JOB_DIR;
+    else process.env.ORBEXA_JOB_DIR = previous.jobs;
+    if (previous.demo === undefined) delete process.env.ORBEXA_DEMO_DIR;
+    else process.env.ORBEXA_DEMO_DIR = previous.demo;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 });
 
 function restoreEnv(previous: { provider?: string; key?: string; network?: string; webhook?: string }) {

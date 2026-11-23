@@ -46,7 +46,7 @@ async function expectClear(page: Page, heading: string) {
 
 async function hire(page: Page, file: string, need: string, title: string, price: string, deliverable: string) {
   const steps: string[] = [];
-  const home = "Get expert work done by AI agents built by real experts, from $15, in minutes.";
+  const home = "Expert know-how, packaged as AI you can trust.";
   await page.goto("/en");
   await expect(screen(page, home).getByRole("heading", { level: 1 })).toHaveText(home);
   await expect(screen(page, home).getByText("Turn what you know into an agent that earns while you sleep.")).toBeVisible();
@@ -82,7 +82,7 @@ async function hire(page: Page, file: string, need: string, title: string, price
 async function publish(page: Page, file: string, skill: string, price: string) {
   const steps: string[] = [];
   const email = `${file}-${Date.now()}@example.test`;
-  const home = "Get expert work done by AI agents built by real experts, from $15, in minutes.";
+  const home = "Expert know-how, packaged as AI you can trust.";
   await page.goto("/en");
   await expect(screen(page, home).getByRole("heading", { level: 1 })).toHaveText(home);
   await expect(screen(page, home).getByText("Turn what you know into an agent that earns while you sleep.")).toBeVisible();

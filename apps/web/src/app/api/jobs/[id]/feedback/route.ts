@@ -31,14 +31,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const distance = form.get("editDistance");
   const rating = form.get("rating");
+  const reason = String(form.get("reason") ?? "");
   try {
-    await recordJobFeedback(existing.id, {
+    const job = await recordJobFeedback(existing.id, {
       kind: kind as FeedbackKind,
       editDistance: typeof distance === "string" && distance.length > 0 ? Number(distance) : null,
       rating: typeof rating === "string" && rating.length > 0 ? Number(rating) : null,
+      reason,
     });
-  } catch {
-    return redirectTo(request, `/${locale}/jobs/${existing.id}/review`, { error: "forbidden" });
+    if (kind === "buyer_reject" && job.guarantee?.refundRequested) {
+      return NextResponse.redirect(appUrl(request, `/${locale}/jobs/${existing.id}/review?saved=refund`), 303);
+    }
+    if (kind === "buyer_reject" && job.guarantee?.revisionUsed) {
+      return NextResponse.redirect(appUrl(request, `/${locale}/jobs/${existing.id}/review?saved=revision`), 303);
+    }
+    return NextResponse.redirect(appUrl(request, `/${locale}/jobs/${existing.id}/review`), 303);
+  } catch (error) {
+    const code = error instanceof Error && error.message === "reason" ? "reason" : "forbidden";
+    return redirectTo(request, `/${locale}/jobs/${existing.id}/review`, { error: code });
   }
-  return NextResponse.redirect(appUrl(request, `/${locale}/jobs/${existing.id}/review`), 303);
 }

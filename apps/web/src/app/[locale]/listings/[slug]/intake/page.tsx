@@ -9,7 +9,7 @@ import { isSupportedLocale } from "@/lib/locale";
 import { findItem } from "@/lib/marketplace";
 import { loadCatalog } from "@/server/catalog";
 
-const LEVELS = new Set(["autonomous", "expert_verified", "expert_led"]);
+const LEVELS = new Set(["autonomous", "expert_verified", "expert_led", "expert_review"]);
 
 export default async function IntakePage({
   params,

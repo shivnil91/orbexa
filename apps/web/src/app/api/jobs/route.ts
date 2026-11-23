@@ -6,7 +6,7 @@ import { stripeTestTransport } from "@/lib/payments";
 import { appUrl, formLocale, redirectTo } from "@/server/http";
 import { currentUser } from "@/server/session";
 
-const LEVELS = new Set(["autonomous", "expert_verified", "expert_led"]);
+const LEVELS = new Set(["autonomous", "expert_verified", "expert_led", "expert_review"]);
 
 export async function POST(request: Request) {
   const form = await request.formData();
