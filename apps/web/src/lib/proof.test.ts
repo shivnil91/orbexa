@@ -7,7 +7,7 @@ import { registerAccount } from "./accounts.ts";
 import { readDb } from "./demo-store.ts";
 import { saveAgent } from "./marketplace.ts";
 import { anthropicTransport, callCost, draftIsThin, executeProof, gradeWithModel, hourlyOpen, parseJudgePayload, proofConfig, ProofBudget, runStoredProof, textFromAnthropicContent } from "./proof.ts";
-import { blindOrder, fenceUntrusted, judgePrompt } from "./trust.ts";
+import { RICH_BID_PACK, blindOrder, fenceUntrusted, fixtureExpertTasks, judgePrompt } from "./trust.ts";
 import { buildCatalog } from "./marketplace.ts";
 
 const interview = [
@@ -160,8 +160,8 @@ test("an empty draft loses even if the judge scores it highly", async () => {
   const budget = new ProofBudget(50);
   const long = "This draft names the missing certificate and does not invent a measurement, a date, or an amount for the bid.";
   const highOnA = JSON.stringify({
-    a: { specialist_check: 0.9, leaves_gaps: 0.9, no_guessed_fact: 0.9 },
-    b: { specialist_check: 0, leaves_gaps: 0, no_guessed_fact: 0 },
+    a: { specialist_check: 0.9, leaves_gaps: 0.9, no_guessed_fact: 0.9, expert_expectation: 0.9 },
+    b: { specialist_check: 0, leaves_gaps: 0, no_guessed_fact: 0, expert_expectation: 0 },
   });
   const judged = await gradeWithModel(
     async () => ({ text: highOnA, inputTokens: 80, outputTokens: 20 }),
@@ -201,8 +201,8 @@ test("an unparseable judge is retried once and then counted as a tie", async () 
 
 test("live rubric means come from the judge and sonnet costs more than haiku", async () => {
   const judge = JSON.stringify({
-    a: { specialist_check: 1, leaves_gaps: 1, no_guessed_fact: 1 },
-    b: { specialist_check: 0, leaves_gaps: 0, no_guessed_fact: 0 },
+    a: { specialist_check: 1, leaves_gaps: 1, no_guessed_fact: 1, expert_expectation: 0 },
+    b: { specialist_check: 0, leaves_gaps: 0, no_guessed_fact: 0, expert_expectation: 0 },
   });
   const proof = await executeProof({
     category: "writing",
@@ -250,9 +250,71 @@ test("example listings do not claim a live proof", async () => {
     version: 1,
     config: proofConfig({}),
   });
+  assert.equal(/baseline|seller agent/i.test(judgePrompt("task", "left", "right", "Apply the UEI rule.")), false);
   assert.equal(harness.fixture, true);
   assert.equal(harness.model, "fixture");
   assert.ok((harness.expertTests ?? 0) > 0);
   assert.ok((harness.categoryTests ?? 0) > 0);
   assert.equal((harness.categoryTests ?? 0) + (harness.expertTests ?? 0), 10);
+});
+
+test("the rich bid pack builds realistic expert tasks and keeps the expectation off the buyer request", async () => {
+  assert.match(RICH_BID_PACK.label, /Example data/);
+  const fixtureTasks = fixtureExpertTasks(RICH_BID_PACK.assets, RICH_BID_PACK.interview);
+  assert.equal(fixtureTasks.length, 4);
+  for (const task of fixtureTasks) {
+    assert.equal(/specialist fact about/i.test(task.request), false);
+    assert.ok(task.request.length >= 80);
+    assert.equal(task.request.toLowerCase().includes(task.expectation.toLowerCase()), false);
+  }
+  const expectations = fixtureTasks.map((task) => task.expectation).join(" ");
+  assert.match(expectations, /UEI/);
+  assert.match(expectations, /amendment/i);
+  assert.match(RICH_BID_PACK.assets.map((asset) => asset.text).join("\n"), /certificate of insurance/i);
+  assert.match(RICH_BID_PACK.assets.map((asset) => asset.name).join(" "), /winning-compliance-row/);
+  const expectation = "Leave the UEI row non-responsive when the SAM.gov registration in the file is expired.";
+  const request = "A school district in Arizona received one janitorial offer. The SAM.gov page in the upload expired in January and the cover sheet's UEI field is blank. Draft the responsiveness note.";
+  const seen: { kind: string; user: string }[] = [];
+  const proof = await executeProof({
+    category: RICH_BID_PACK.category,
+    instructions: RICH_BID_PACK.instructions,
+    assets: RICH_BID_PACK.assets,
+    interview: RICH_BID_PACK.interview,
+    examples: [],
+    version: 1,
+    config: { live: true, model: "claude-sonnet-5-5", judgeModel: "claude-haiku-4-5", budgetMinor: 5000, hourlyCap: 6, key: "test" },
+    transport: async (call) => {
+      if (call.user.includes("realistic buyer requests")) {
+        seen.push({ kind: "generate", user: call.user });
+        return {
+          text: JSON.stringify({ tasks: [{ request, expectation }, { request: `${request} The second offer arrived by email.`, expectation }] }),
+          inputTokens: 2000,
+          outputTokens: 400,
+        };
+      }
+      if (call.user.includes("Grade two drafts")) {
+        seen.push({ kind: "judge", user: call.user });
+        return {
+          text: JSON.stringify({
+            a: { specialist_check: 1, leaves_gaps: 1, no_guessed_fact: 1, expert_expectation: 1 },
+            b: { specialist_check: 0, leaves_gaps: 0, no_guessed_fact: 0, expert_expectation: 0 },
+          }),
+          inputTokens: 300,
+          outputTokens: 50,
+        };
+      }
+      seen.push({ kind: call.user.includes("specialist material") ? "agent" : "baseline", user: call.user });
+      const draft = call.user.includes("specialist material")
+        ? "The registration in the file is expired, so the UEI row stays non-responsive. No identifier was invented."
+        : "The offer looks complete enough to treat the registration as active and fill in a UEI.";
+      return { text: draft, inputTokens: 1500, outputTokens: 200 };
+    },
+  });
+  assert.equal(seen.some((row) => row.kind === "generate"), true);
+  assert.equal(seen.filter((row) => row.kind === "agent" || row.kind === "baseline").every((row) => !row.user.includes(expectation)), true);
+  assert.equal(seen.some((row) => row.kind === "judge" && row.user.includes(expectation)), true);
+  assert.equal(proof.outcomes?.some((row) => row.source === "expert_fact" && row.task === request), true);
+  assert.equal(JSON.stringify(proof.outcomes).includes("specialist fact about"), false);
+  assert.equal(proof.fixture, false);
+  assert.ok((proof.expertTests ?? 0) >= 1);
 });

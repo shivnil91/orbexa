@@ -429,6 +429,7 @@ const en: Catalog = {
     "proof.rubric.specialist_check": "Uses a specialist check",
     "proof.rubric.leaves_gaps": "Leaves a gap visible",
     "proof.rubric.no_guessed_fact": "Does not invent a fact",
+    "proof.rubric.expert_expectation": "Applies the expert expectation",
     "knowledge.title": "Knowledge inside",
     "knowledge.private": "Counts and types only. The files and interview answers are not shown.",
     "knowledge.empty": "No specialist files are attached.",
