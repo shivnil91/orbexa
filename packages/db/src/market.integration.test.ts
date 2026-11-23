@@ -16,7 +16,7 @@ type Sql = {
 };
 
 function pgliteClient(memory: PGlite): MigrationClient & Sql {
-  return {
+  const client = {
     async query(sql: string, params?: readonly unknown[]) {
       const text = sql.trim();
       if (params && params.length > 0) {
@@ -31,6 +31,7 @@ function pgliteClient(memory: PGlite): MigrationClient & Sql {
       return { rows: [] };
     },
   };
+  return client as MigrationClient & Sql;
 }
 
 async function applyAll(client: MigrationClient): Promise<void> {
