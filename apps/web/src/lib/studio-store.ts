@@ -9,8 +9,9 @@ import { gatesPass, hardCaseSatisfied, lineDiff, readinessGates, reportText, stu
 import { emptyHard, type BenchResult, type OutputTemplate, type Proposal, type StudioConfig, type StudioRecord, type StudioReport, type StudioVersion } from "./studio-types.ts";
 import { EXAMPLE_SELLER_ID, saveAgent } from "./marketplace.ts";
 import { absentProof, configFromPackage, sealPackage, verifyPackage, type AgentPackage } from "./package.ts";
-import { executeProof, hourlyOpen, proofConfig, scheduleProof } from "./proof.ts";
-import { execute, modelTransport } from "./runtime.ts";
+import { scheduleProof } from "./proof.ts";
+import { seedExamples } from "./seed.ts";
+import { execute } from "./runtime.ts";
 import { contentHash, steersJudge } from "./trust.ts";
 
 export type StudioRunRecord = {
@@ -639,69 +640,14 @@ export async function leadsFor(ownerId: string, slug: string): Promise<{ created
     .map((run) => ({ createdAt: run.createdAt }));
 }
 
-export async function ensureExampleProof(env: Record<string, string | undefined> = process.env): Promise<void> {
-  const config = proofConfig(env);
-  const gate = await updateDb((db) => {
-    db.exampleProofs = db.exampleProofs ?? {};
-    const existing = db.exampleProofs[NDIS_EXAMPLE_SLUG];
-    if (existing?.status === "complete" && (!config.live || existing.fixture === false)) return { action: "skip" as const };
-    if (existing?.status === "running" || existing?.status === "queued") return { action: "skip" as const };
-    const recent = (db.exampleProofRuns ?? []).filter((stamp) => Date.parse(stamp) >= Date.now() - 60 * 60 * 1000);
-    if (!hourlyOpen(recent, Date.now(), config.hourlyCap)) {
-      return { action: "hourly" as const };
-    }
-    db.exampleProofRuns = recent.concat(new Date().toISOString()).slice(-50);
-    db.exampleProofs[NDIS_EXAMPLE_SLUG] = {
-      id: existing?.id ?? randomUUID(),
-      version: 1,
-      status: "running",
-      startedAt: new Date().toISOString(),
-      finishedAt: null,
-      model: "pending",
-      judgeModel: "pending",
-      fixture: !config.live,
-      tests: 0,
-      wins: 0,
-      ties: 0,
-      losses: 0,
-      winRate: 0,
-      proven: false,
-      rubric: [],
-      examples: [],
-      costMinor: 0,
-      capped: false,
-    };
-    return { action: "run" as const };
-  });
-  if (gate.action !== "run") return;
-  const material = proofMaterial(ndisStudioConfig());
-  try {
-    const result = await executeProof({
-      category: "research",
-      instructions: material.instructions,
-      assets: material.assets,
-      interview: [],
-      examples: material.examples.length > 0 ? material.examples : [{ title: "Wages file", body: "A missing document is left blank. No lender rate was invented." }],
-      version: 1,
-      config,
-      transport: config.live ? modelTransport(env) : undefined,
-    });
-    await updateDb((db) => {
-      const current = db.exampleProofs?.[NDIS_EXAMPLE_SLUG];
-      if (!current || current.status !== "running") return;
-      db.exampleProofs = db.exampleProofs ?? {};
-      db.exampleProofs[NDIS_EXAMPLE_SLUG] = { ...result, id: current.id, startedAt: current.startedAt };
-    });
-  } catch {
-    await updateDb((db) => {
-      const current = db.exampleProofs?.[NDIS_EXAMPLE_SLUG];
-      if (!current || current.status !== "running") return;
-      current.status = "failed";
-      current.finishedAt = new Date().toISOString();
-      current.error = "run";
-      current.proven = false;
-    });
-  }
+/**
+ * The example listing used to await a live proof on the request. Dev injects a
+ * model key, the JSON file is empty after a restart, and that proof exceeded
+ * the 30s page timeout. The seeded proof is a fixture and is not upgraded to
+ * a live model call from the page.
+ */
+export async function ensureExampleProof(): Promise<void> {
+  await seedExamples();
 }
 
 export function queueStudioProof(slug: string): void {

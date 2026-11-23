@@ -152,9 +152,12 @@
       "Action": [
         "logs:CreateLogGroup",
         "logs:DeleteLogGroup",
+        "logs:DeleteMetricFilter",
         "logs:DeleteRetentionPolicy",
         "logs:DescribeLogGroups",
+        "logs:DescribeMetricFilters",
         "logs:ListTagsForResource",
+        "logs:PutMetricFilter",
         "logs:PutRetentionPolicy",
         "logs:TagResource",
         "logs:UntagResource"
@@ -163,6 +166,19 @@
         "arn:aws:logs:ap-southeast-2:486726633485:log-group:/orbexa/dev/*",
         "arn:aws:logs:ap-southeast-2:486726633485:log-group:/orbexa/dev/*:*"
       ]
+    },
+    {
+      "Sid": "DevAlarms",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:ListTagsForResource",
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource"
+      ],
+      "Resource": "arn:aws:cloudwatch:ap-southeast-2:486726633485:alarm:orbexa-dev-*"
     },
     {
       "Sid": "DescribeDevLogs",

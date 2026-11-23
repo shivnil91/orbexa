@@ -8,13 +8,14 @@
     "./migrations.ts": "./src/migrations.ts",
     "./learning.ts": "./src/learning.ts",
     "./feedback.ts": "./src/feedback.ts",
-    "./pg16.ts": "./src/pg16.ts"
+    "./pg16.ts": "./src/pg16.ts",
+    "./apply-migrations.ts": "./src/apply-migrations.ts"
   },
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/money.test.ts src/local-guard.test.ts src/migrations.test.ts src/apply-migrations.test.ts src/learning.test.ts src/judge.test.ts src/eval-gate.test.ts src/feedback.test.ts src/rl.integration.test.ts src/schema.integration.test.ts src/learning.integration.test.ts",
-    "test:pg16": "PG16=1 node --experimental-strip-types --test src/schema.integration.test.ts && PG16=1 node --experimental-strip-types --test src/learning.integration.test.ts",
+    "test": "node --experimental-strip-types --test src/money.test.ts src/local-guard.test.ts src/migrations.test.ts src/apply-migrations.test.ts src/learning.test.ts src/judge.test.ts src/eval-gate.test.ts src/feedback.test.ts src/rl.integration.test.ts src/schema.integration.test.ts src/learning.integration.test.ts src/market.integration.test.ts",
+    "test:pg16": "PG16=1 node --experimental-strip-types --test src/schema.integration.test.ts && PG16=1 node --experimental-strip-types --test src/learning.integration.test.ts && PG16=1 node --experimental-strip-types --test src/market.integration.test.ts",
     "migrate": "node --experimental-strip-types src/migrate.ts"
   },
   "devDependencies": {

@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS market.bench_case_revisions;
+DROP TABLE IF EXISTS market.bench_cases;
+DROP TABLE IF EXISTS market.calculator_revisions;
+DROP TABLE IF EXISTS market.calculators;
+DROP TABLE IF EXISTS market.rule_revisions;
+DROP TABLE IF EXISTS market.rules;
+DROP TABLE IF EXISTS market.knowledge_chunks;
+DROP TABLE IF EXISTS market.knowledge_documents;
+DROP FUNCTION IF EXISTS market.chunk_matches_document();
+DROP FUNCTION IF EXISTS market.reject_history_mutation();

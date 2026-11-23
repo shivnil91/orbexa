@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { jobDirectory, listJobFiles, readJobFile, writeJobFile } from "./job-files.ts";
 import { packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
 import { readDb } from "./demo-store.ts";
 import { assertNoLiveStripeKey } from "./live-key.ts";
@@ -98,14 +98,7 @@ export type JobRecord = {
 const locks = new Map<string, Promise<unknown>>();
 
 function rootDir(): string {
-  return process.env.ORBEXA_JOB_DIR ?? path.join(os.tmpdir(), "orbexa-m5-jobs");
-}
-
-function jobPath(id: string): string {
-  if (!UUID.test(id)) {
-    throw new Error("job id is not a uuid");
-  }
-  return path.join(rootDir(), `${id}.json`);
+  return jobDirectory();
 }
 
 async function withLock<T>(id: string, work: () => Promise<T>): Promise<T> {
@@ -115,17 +108,26 @@ async function withLock<T>(id: string, work: () => Promise<T>): Promise<T> {
   return run;
 }
 
+async function market() {
+  const { getMarket } = await import("./repository.ts");
+  return getMarket();
+}
+
 export async function readJob(id: string): Promise<JobRecord | null> {
-  try {
-    return JSON.parse(await readFile(jobPath(id), "utf8")) as JobRecord;
-  } catch {
-    return null;
+  const { usesPostgres } = await import("./repository.ts");
+  if (usesPostgres()) {
+    return market().then((store) => store.readJob(id) as Promise<JobRecord | null>);
   }
+  return readJobFile(id) as Promise<JobRecord | null>;
 }
 
 async function writeJob(job: JobRecord): Promise<void> {
-  await mkdir(rootDir(), { recursive: true });
-  await writeFile(jobPath(job.id), JSON.stringify(job));
+  const { usesPostgres } = await import("./repository.ts");
+  if (usesPostgres()) {
+    await (await market()).writeJob(job);
+    return;
+  }
+  await writeJobFile(job);
 }
 
 export async function createJob(input: {
@@ -783,26 +785,10 @@ export async function refundUnreleasedJob(
 }
 
 export async function listJobs(): Promise<JobRecord[]> {
-  let names: string[] = [];
-  try {
-    names = await readdir(/*turbopackIgnore: true*/ rootDir());
-  } catch {
-    return [];
-  }
-  const jobs: JobRecord[] = [];
-  for (const name of names) {
-    if (!name.endsWith(".json")) {
-      continue;
-    }
-    const id = name.slice(0, -".json".length);
-    if (!UUID.test(id)) {
-      continue;
-    }
-    const job = await readJob(id);
-    if (job) {
-      jobs.push(job);
-    }
-  }
+  const { usesPostgres } = await import("./repository.ts");
+  const jobs = usesPostgres()
+    ? ((await (await market()).listJobs()) as JobRecord[])
+    : ((await listJobFiles()) as JobRecord[]);
   jobs.sort((left, right) => (right.createdAt ?? right.startedAt ?? 0) - (left.createdAt ?? left.startedAt ?? 0));
   return jobs;
 }

@@ -283,6 +283,25 @@ data "aws_iam_policy_document" "documents" {
       values   = ["false"]
     }
   }
+
+  statement {
+    sid     = "DenyPublicObjectAcl"
+    effect  = "Deny"
+    actions = ["s3:PutObject", "s3:PutObjectAcl"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    resources = ["${aws_s3_bucket.documents.arn}/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "s3:x-amz-acl"
+      values   = ["public-read", "public-read-write", "authenticated-read"]
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "documents" {
@@ -329,6 +348,12 @@ resource "aws_secretsmanager_secret" "demo_auth" {
   recovery_window_in_days = 7
 }
 
+resource "aws_secretsmanager_secret" "upload_signing" {
+  name                    = "orbexa/dev/api/upload_signing"
+  description             = "HMAC key for private upload URLs. The secret value is set in the console, not in Terraform."
+  recovery_window_in_days = 7
+}
+
 resource "aws_db_subnet_group" "this" {
   name       = "orbexa-dev"
   subnet_ids = aws_subnet.public[*].id
@@ -353,7 +378,8 @@ resource "aws_db_instance" "postgres" {
   allocated_storage     = 20
   max_allocated_storage = 20
   storage_type          = "gp3"
-  storage_encrypted     = true
+  # Encryption at rest uses the AWS-managed RDS key. Confirmed here; no extra CMK.
+  storage_encrypted = true
 
   db_name  = "orbexa"
   username = "orbexa"
@@ -363,8 +389,9 @@ resource "aws_db_instance" "postgres" {
   parameter_group_name        = aws_db_parameter_group.postgres.name
   vpc_security_group_ids      = [aws_security_group.database.id]
 
-  multi_az                     = false
-  publicly_accessible          = false
+  multi_az            = false
+  publicly_accessible = false
+  # Retention above 0 enables point-in-time recovery for that many days.
   backup_retention_period      = var.db_backup_retention_days
   backup_window                = "17:00-18:00"
   maintenance_window           = "sun:18:00-sun:19:00"
@@ -447,6 +474,7 @@ data "aws_iam_policy_document" "execution_secrets" {
       aws_secretsmanager_secret.stripe_test.arn,
       aws_secretsmanager_secret.demo_auth.arn,
       one(aws_db_instance.postgres.master_user_secret).secret_arn,
+      aws_secretsmanager_secret.upload_signing.arn,
     ]
   }
 }
@@ -599,6 +627,10 @@ resource "aws_ecs_task_definition" "app" {
           valueFrom = aws_secretsmanager_secret.demo_auth.arn
         },
         {
+          name      = "UPLOAD_SIGNING_KEY"
+          valueFrom = aws_secretsmanager_secret.upload_signing.arn
+        },
+        {
           name      = "ANTHROPIC_API_KEY"
           valueFrom = aws_secretsmanager_secret.anthropic.arn
         },
@@ -659,6 +691,75 @@ resource "aws_ecs_task_definition" "app" {
       }
     },
   ])
+}
+
+resource "aws_cloudwatch_log_metric_filter" "api_5xx" {
+  name           = "orbexa-dev-api-5xx"
+  log_group_name = aws_cloudwatch_log_group.app.name
+  pattern        = "{ $.event = \"http_5xx\" }"
+
+  metric_transformation {
+    name          = "Api5xx"
+    namespace     = "Orbexa/Dev"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "api_5xx" {
+  alarm_name          = "orbexa-dev-api-5xx"
+  alarm_description   = "Dev API logged HTTP 5xx responses."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Api5xx"
+  namespace           = "Orbexa/Dev"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 5
+  treat_missing_data  = "notBreaching"
+}
+
+resource "aws_cloudwatch_metric_alarm" "api_latency" {
+  alarm_name          = "orbexa-dev-api-latency"
+  alarm_description   = "Dev API p95 latency is above 2 seconds."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Latency"
+  namespace           = "Orbexa/Dev"
+  period              = 300
+  extended_statistic  = "p95"
+  threshold           = 2000
+  treat_missing_data  = "notBreaching"
+}
+
+resource "aws_cloudwatch_metric_alarm" "db_cpu" {
+  alarm_name          = "orbexa-dev-db-cpu"
+  alarm_description   = "Dev RDS CPU is above 80 percent."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.postgres.identifier
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "model_spend" {
+  alarm_name          = "orbexa-dev-model-spend"
+  alarm_description   = "Dev model spend is above 1000 cents in an hour."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ModelSpendCents"
+  namespace           = "Orbexa/Dev"
+  period              = 3600
+  statistic           = "Sum"
+  threshold           = 1000
+  treat_missing_data  = "notBreaching"
 }
 
 resource "aws_ecs_service" "app" {

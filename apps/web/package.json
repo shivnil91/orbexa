@@ -8,25 +8,29 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
-    "test": "node --experimental-strip-types --test src/lib/format.test.ts src/lib/locale.test.ts src/lib/dashboard.test.ts src/lib/contrast.test.ts src/lib/payments.test.ts src/lib/jobs.test.ts src/lib/metrics-log.test.ts src/lib/health.test.ts src/lib/database-url.test.ts src/lib/live-key.test.ts src/lib/demo-auth.test.ts src/lib/marketplace.test.ts src/lib/model.test.ts src/lib/security.test.ts src/lib/proof.test.ts src/lib/trust.test.ts src/lib/model-router.test.ts src/lib/studio.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/format.test.ts src/lib/locale.test.ts src/lib/dashboard.test.ts src/lib/contrast.test.ts src/lib/payments.test.ts src/lib/jobs.test.ts src/lib/metrics-log.test.ts src/lib/health.test.ts src/lib/database-url.test.ts src/lib/live-key.test.ts src/lib/demo-auth.test.ts src/lib/marketplace.test.ts src/lib/model.test.ts src/lib/security.test.ts src/lib/proof.test.ts src/lib/trust.test.ts src/lib/model-router.test.ts src/lib/studio.test.ts src/lib/log.test.ts src/lib/uploads.test.ts src/lib/seed.test.ts src/lib/repository.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {
     "@orbexa/db": "workspace:*",
+    "@aws-sdk/client-s3": "^3.1175.0",
+    "@aws-sdk/s3-request-presigner": "^3.1175.0",
     "next": "16.4.6",
+    "pg": "8.16.3",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.11.0",
+    "@playwright/test": "1.56.1",
     "@tailwindcss/turbopack": "4.3.3",
     "@types/node": "^22.19.1",
+    "@types/pg": "8.15.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "tailwindcss": "4.3.3",
-    "typescript": "^5",
-    "@axe-core/playwright": "4.11.0",
-    "@playwright/test": "1.56.1"
+    "typescript": "^5"
   }
 }

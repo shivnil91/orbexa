@@ -50,6 +50,8 @@ const forcedRls = [
 
 test("migrations declare the foundation tables and do not enable checkout", async () => {
   const files = await loadMigrations();
+  assert.equal(files.some((file) => file.name.endsWith(".down.sql")), false);
+  assert.ok(files.some((file) => file.name === "0015_market.sql"));
   const sql = files.map((file) => file.sql).join("\n");
   for (const table of requiredTables) {
     assert.match(sql, new RegExp(`CREATE TABLE ${table}\\b`));
