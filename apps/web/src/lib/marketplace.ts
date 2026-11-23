@@ -263,6 +263,16 @@ export function tiersForPrice(priceMinor: number): Tier[] {
 
 const OFF_REVIEW: ExpertReviewConfig = { enabled: false, priceMinor: 0, slaHours: 48 };
 
+function cleanExpertReview(basePrice: number, review: ExpertReviewConfig | undefined): ExpertReviewConfig {
+  if (!review?.enabled) return OFF_REVIEW;
+  const slaHours = review.slaHours === 24 || review.slaHours === 72 ? review.slaHours : 48;
+  const asked = Number.isSafeInteger(review.priceMinor) && review.priceMinor > 0 ? Math.min(review.priceMinor, 500_000) : 0;
+  const anchor = basePrice >= 500 ? basePrice : 500;
+  const tier = expertReviewTier(anchor, { enabled: true, priceMinor: asked, slaHours });
+  if (!tier) return OFF_REVIEW;
+  return { enabled: true, priceMinor: tier.priceMinor, slaHours: tier.slaHours ?? slaHours };
+}
+
 export function expertReviewTier(priceMinor: number, review: ExpertReviewConfig): Tier | null {
   if (!review.enabled) return null;
   const led = Math.max(priceMinor + 100, Math.round(priceMinor * 1.8));
@@ -752,9 +762,6 @@ export function validateAgent(input: AgentInput, intent: "draft" | "publish"): {
     return { ok: false, error: "knowledge" };
   }
   const interview = cleanInterview(input.interview ?? []);
-  const expertReview = input.expertReview?.enabled
-    ? { enabled: true, priceMinor: input.expertReview.priceMinor, slaHours: input.expertReview.slaHours }
-    : OFF_REVIEW;
   const priceMinor = input.priceRaw.trim() ? parsePriceDollars(input.priceRaw) : 0;
   if (input.priceRaw.trim() && priceMinor == null) {
     return { ok: false, error: "price" };
@@ -780,7 +787,7 @@ export function validateAgent(input: AgentInput, intent: "draft" | "publish"): {
       assets,
       interview,
       trainingConsent: input.trainingConsent === true,
-      expertReview,
+      expertReview: cleanExpertReview(priceMinor ?? 0, input.expertReview),
       exampleTitle,
       exampleBody,
       priceMinor: priceMinor ?? 0,
@@ -1003,6 +1010,6 @@ export function isListingSlug(slug: string): boolean {
 
 export function acceptedEarnings(jobs: { sellerId?: string; listingSlug: string; status: string; creatorRoyaltyMinor: number; refunded?: boolean }[], sellerId: string, slugs: string[]): number {
   return jobs
-    .filter((job) => job.status === "accepted" && job.refunded !== true && (job.sellerId === sellerId || slugs.includes(job.listingSlug)))
+    .filter((job) => job.status === "accepted" && job.refunded !== true && job.sellerId === sellerId && slugs.includes(job.listingSlug))
     .reduce((sum, job) => sum + job.creatorRoyaltyMinor, 0);
 }

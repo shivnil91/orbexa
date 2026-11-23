@@ -14,7 +14,6 @@ export async function POST(request: Request) {
   if (!isListingSlug(slug)) return redirectTo(request, back, { error: "missing" });
   const result = await queueProofRerun(user.id, slug);
   if (!result.ok) return redirectTo(request, back, { error: result.error });
-  scheduleProof(slug);
   after(() => {
     scheduleProof(slug);
   });

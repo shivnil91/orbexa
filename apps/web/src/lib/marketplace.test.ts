@@ -132,6 +132,23 @@ test("publish validation rejects a short instruction and accepts a complete agen
   assert.equal(saved.ok, true);
     if (saved.ok) {
     assert.equal(saved.value.priceMinor, 4000);
+    const reviewed = validateAgent({ ...input, expertReview: { enabled: true, priceMinor: 100, slaHours: 24 } }, "publish");
+    assert.equal(reviewed.ok, true);
+    if (reviewed.ok && reviewed.value.expertReview) {
+      assert.ok(reviewed.value.expertReview.priceMinor > 4000);
+      assert.notEqual(reviewed.value.expertReview.priceMinor, 100);
+      assert.equal(reviewed.value.expertReview.slaHours, 24);
+    } else {
+      assert.fail("expert review price was not clamped");
+    }
+    const inflated = validateAgent({ ...input, expertReview: { enabled: true, priceMinor: Number.POSITIVE_INFINITY, slaHours: 1 } }, "publish");
+    assert.equal(inflated.ok, true);
+    if (inflated.ok && inflated.value.expertReview) {
+      assert.ok(inflated.value.expertReview.priceMinor <= 500_000);
+      assert.equal(inflated.value.expertReview.slaHours, 48);
+    } else {
+      assert.fail("expert review price was not capped");
+    }
   }
   const thin = validateAgent({
     ...input,
@@ -160,6 +177,11 @@ test("accepted earnings sum only this seller's accepted orders", () => {
     { sellerId: "seller", listingSlug: "a", status: "accepted", creatorRoyaltyMinor: 500, refunded: true },
   ], "seller", ["a"]);
   assert.equal(total, 3200);
+  const crossed = acceptedEarnings([
+    { sellerId: "other", listingSlug: "a", status: "accepted", creatorRoyaltyMinor: 900 },
+    { sellerId: "seller", listingSlug: "a", status: "accepted", creatorRoyaltyMinor: 3200 },
+  ], "seller", ["a"]);
+  assert.equal(crossed, 3200);
 });
 
 describe("accounts and connect", { concurrency: false }, () => {

@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from orbexa_ai.ingest import Chunk
 from orbexa_ai.limits import RunBudget
+from orbexa_ai.safety import wrap_untrusted_document
 
 
 class ProviderError(RuntimeError):
@@ -53,7 +54,7 @@ def urllib_transport(
 
 def _document(chunks: list[Chunk]) -> str:
     parts = [f"{chunk.document_name}: {chunk.body}" for chunk in chunks]
-    return "<untrusted_document>\n" + "\n".join(parts) + "\n</untrusted_document>"
+    return wrap_untrusted_document("\n".join(parts))
 
 
 def _instruction(task: str) -> str:

@@ -5,6 +5,7 @@ import { Notice } from "@/components/notice";
 import { SubmitButton } from "@/components/submit-button";
 import { inputClass, pageClass } from "@/components/styles";
 import { canSell } from "@/lib/accounts";
+import { canReviewAsSeller } from "@/lib/job-access";
 import { messageFor, t } from "@/lib/i18n";
 import { readJob } from "@/lib/jobs";
 import { isSupportedLocale } from "@/lib/locale";
@@ -27,7 +28,7 @@ export default async function ExpertQueuePage({
   if (!user) redirect(`/${locale}/sign-in?next=/${locale}/sell/queue/${id}`);
   if (!canSell(user.role)) notFound();
   const job = await readJob(id);
-  if (!job || job.sellerId !== user.id || job.serviceLevel !== "expert_review") notFound();
+  if (!job || !canReviewAsSeller(job, user.id)) notFound();
   const error = messageFor(locale, query.error);
   return (
     <main id="content" className={`${pageClass} max-w-3xl`}>

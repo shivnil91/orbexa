@@ -4,7 +4,7 @@ import { canSell } from "@/lib/accounts";
 import { isListingSlug, saveAgent, type AgentInput } from "@/lib/marketplace";
 import type { AssetKind, InterviewAnswer, KnowledgeAsset, KnowledgeNote } from "@/lib/demo-store";
 import { scheduleProof } from "@/lib/proof";
-import { INTERVIEW } from "@/lib/trust";
+import { acceptKnowledgeFile, INTERVIEW } from "@/lib/trust";
 import { formLocale, redirectTo } from "@/server/http";
 import { currentUser } from "@/server/session";
 
@@ -38,9 +38,10 @@ async function knowledgeFrom(form: FormData): Promise<{ notes: KnowledgeNote[]; 
   const fileKind = KINDS.has(requested as AssetKind) ? (requested as AssetKind) : "rule";
   if (file instanceof File && file.size > 0) {
     if (file.size > 100_000) return { notes: [], assets: [], interview: [], error: "knowledge" };
-    const body = (await file.text()).replace(/\u0000/g, "");
-    const name = file.name.replace(/[^\w.\- ]+/g, "").slice(0, 80) || "upload.txt";
-    const made = asset(fileKind, name, body);
+    const body = await file.text();
+    const accepted = acceptKnowledgeFile(file.name, file.size, body);
+    if (!accepted.ok) return { notes: [], assets: [], interview: [], error: "knowledge" };
+    const made = asset(fileKind, accepted.name, accepted.text);
     if (!made) return { notes, assets, interview: [], error: "knowledge" };
     assets.push(made);
     notes.push({ name: made.name, text: made.text });

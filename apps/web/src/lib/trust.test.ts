@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { registerAccount, updateProfile, verifyCredential } from "./accounts.ts";
 import { buildCatalog, recommend } from "./marketplace.ts";
-import { blindOrder, buyerDraft, proofGroup, retrieveAssets, toPublicProof } from "./trust.ts";
+import { acceptKnowledgeFile, blindOrder, buyerDraft, cleanAssetName, proofGroup, retrieveAssets, toPublicProof } from "./trust.ts";
 import type { ProofRecord } from "./demo-store.ts";
 
 test("proven agents sort above a closer unproven match", () => {
@@ -61,6 +61,19 @@ test("blind order is stable and uses both sides", () => {
   const orders = new Set(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map((id) => blindOrder(id)));
   assert.equal(orders.size, 2);
   assert.equal(blindOrder("a"), blindOrder("a"));
+});
+
+test("knowledge uploads are limited to small text files and names cannot carry markup", () => {
+  assert.equal(cleanAssetName('<script>alert(1)</script>.txt'), "scriptalert1script.txt");
+  const html = acceptKnowledgeFile("notes.html", 20, "<script>alert(1)</script>");
+  assert.equal(html.ok, false);
+  const svg = acceptKnowledgeFile("picture.svg", 20, "<svg onload=alert(1)>");
+  assert.equal(svg.ok, false);
+  const big = acceptKnowledgeFile("notes.txt", 100_001, "hello");
+  assert.equal(big.ok, false);
+  const fine = acceptKnowledgeFile("rules.txt", 32, "Do not invent a measurement.");
+  assert.equal(fine.ok, true);
+  if (fine.ok) assert.equal(fine.name, "rules.txt");
 });
 
 test("a seller cannot mark a credential verified", async () => {

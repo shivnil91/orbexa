@@ -76,6 +76,7 @@ test("seller publishes, buyer hires, and admin can hide the listing", async ({ p
   await expect(page.getByText(/Beats plain AI in \d+\/10 tests/).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Side by side" })).toBeVisible();
   await expect(page.getByText("SECRET")).toHaveCount(0);
+  await expect(page.getByText("Load case LC2 must be named before a result is given")).toHaveCount(0);
   if (info.project.name === "mobile") {
     await page.getByRole("region", { name: "Orbexa Proof" }).screenshot({ path: "/opt/cursor/artifacts/listing-proof-mobile.png" });
     await page.locator("article").filter({ hasText: "Plain AI" }).first().screenshot({ path: "/opt/cursor/artifacts/proof-side-by-side-mobile.png" });

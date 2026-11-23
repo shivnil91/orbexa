@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { updateDb } from "@/lib/demo-store";
-import { approveReviewedRefund } from "@/lib/jobs";
+import { approveReviewedRefund, readJob } from "@/lib/jobs";
 import { formLocale, redirectTo } from "@/server/http";
 import { currentUser } from "@/server/session";
 
@@ -13,18 +13,21 @@ export async function POST(request: Request) {
   }
   const id = String(form.get("job") ?? "");
   try {
-    const job = await approveReviewedRefund(id);
-    await updateDb((db) => {
-      db.audit = db.audit ?? [];
-      db.audit.push({
-        id: randomUUID(),
-        at: new Date().toISOString(),
-        actorId: user.id,
-        action: "refund_approve",
-        targetId: job.id,
-        detail: "guarantee",
+    const prior = await readJob(id);
+    const job = await approveReviewedRefund(id, user);
+    if (!prior?.refunded && job.refunded) {
+      await updateDb((db) => {
+        db.audit = db.audit ?? [];
+        db.audit.push({
+          id: randomUUID(),
+          at: new Date().toISOString(),
+          actorId: user.id,
+          action: "refund_approve",
+          targetId: job.id,
+          detail: "guarantee",
+        });
       });
-    });
+    }
   } catch {
     return redirectTo(request, `/${locale}/admin`, { error: "missing" });
   }

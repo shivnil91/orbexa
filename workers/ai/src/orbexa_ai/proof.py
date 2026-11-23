@@ -13,17 +13,14 @@ from dataclasses import dataclass
 from orbexa_ai.gateway import LlmGateway
 from orbexa_ai.ingest import Chunk
 from orbexa_ai.limits import RunBudget
-from orbexa_ai.safety import wrap_untrusted_document
+from orbexa_ai.safety import fence_untrusted, wrap_untrusted_document
 
 ASSET_TAG = "untrusted_expert_asset"
 
 
 def fence_expert_asset(kind: str, text: str) -> str:
-    """Wrap seller material. A closing fence in the text is stripped first."""
-    allowed = "".join(ch for ch in kind.lower() if ch.isascii() and (ch.isalnum() or ch == "_"))
-    safe_kind = allowed[:24] or "note"
-    stripped = text.replace(f"</{ASSET_TAG}>", "").replace("</untrusted_document>", "")
-    return f'<{ASSET_TAG} kind="{safe_kind}">\n{stripped}\n</{ASSET_TAG}>'
+    """Wrap seller material. A closing fence in the text cannot break out."""
+    return fence_untrusted(ASSET_TAG, text, kind=kind)
 
 
 def _chunk(name: str, body: str) -> Chunk:

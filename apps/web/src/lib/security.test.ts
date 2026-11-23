@@ -74,6 +74,7 @@ test("a buyer cannot read or change another buyer's order", () => {
   ];
   assert.deepEqual(buyerOrders(jobs, BUYER).map((job) => job.id), ["1"]);
   assert.deepEqual(sellerOrders(jobs, "seller", ["mine"]).map((job) => job.id), ["1"]);
+  assert.deepEqual(sellerOrders([...jobs, { id: "3", tenantId: OTHER, sellerId: "other", listingSlug: "mine", title: "Shared slug", status: "waiting_for_expert", priceMinor: 100, currency: "USD", opportunityName: "other brief" }], "seller", ["mine"]).map((job) => job.id), ["1"]);
   const summary = orderSummary(jobs[0]);
   assert.equal("opportunityName" in summary, false);
   assert.equal(JSON.stringify(summary).includes("secret need"), false);
@@ -117,6 +118,18 @@ test("job routes check the buyer and checkout does not take a destination accoun
   assert.match(events, /canReadJob/);
   const hire = await readFile(path.join(process.cwd(), "src/app/api/jobs/route.ts"), "utf8");
   assert.match(hire, /!item\.example/);
+  const proof = await readFile(path.join(process.cwd(), "src/app/api/agents/proof/route.ts"), "utf8");
+  assert.match(proof, /currentUser/);
+  assert.match(proof, /queueProofRerun\(user\.id/);
+  assert.equal(proof.split("scheduleProof(").length - 1, 1);
+  const publicProof = await readFile(path.join(process.cwd(), "src/app/api/listings/[slug]/proof/route.ts"), "utf8");
+  assert.equal(publicProof.includes("scheduleProof"), false);
+  const refunds = await readFile(path.join(process.cwd(), "src/app/api/admin/refunds/route.ts"), "utf8");
+  assert.match(refunds, /user\?\.admin/);
+  const credentials = await readFile(path.join(process.cwd(), "src/app/api/admin/credentials/route.ts"), "utf8");
+  assert.match(credentials, /user\?\.admin/);
+  const expert = await readFile(path.join(process.cwd(), "src/app/api/jobs/[id]/expert-draft/route.ts"), "utf8");
+  assert.match(expert, /user\.id/);
 });
 
 describe("accounts, suspension, and connect status", { concurrency: false }, () => {

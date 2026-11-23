@@ -5,6 +5,7 @@ import path from "node:path";
 import { packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
 import { readDb } from "./demo-store.ts";
 import { publishedListing } from "./marketplace.ts";
+import { assertNoLiveStripeKey } from "./live-key.ts";
 import { buyerDraft, retrieveAssets, revisionDraft } from "./trust.ts";
 import { validateFeedback, type FeedbackInput, type FeedbackKind } from "@orbexa/db/feedback.ts";
 import { validateIntake } from "./intake.ts";
@@ -451,7 +452,7 @@ export async function recordJobFeedback(
         job.revisionCount = (job.revisionCount ?? 0) + 1;
         const note = revisionDraft(reason);
         job.paragraphs = job.transcript ? job.paragraphs.concat(note.slice(0, 2)) : note;
-      } else if (!guarantee.refundRequested) {
+      } else if (!guarantee.refundRequested && job.tenantId !== DEMO_ORG_ID) {
         guarantee.refundRequested = true;
         guarantee.refundReason = reason;
         job.guarantee = guarantee;
@@ -526,7 +527,15 @@ export async function releaseExpertReview(id: string, sellerId: string): Promise
   });
 }
 
-export async function approveReviewedRefund(id: string): Promise<JobRecord> {
+export async function approveReviewedRefund(
+  id: string,
+  actor: { admin: boolean },
+  env: Record<string, string | undefined> = process.env,
+): Promise<JobRecord> {
+  if (!actor.admin) {
+    throw new Error("forbidden");
+  }
+  assertNoLiveStripeKey(env);
   return withLock(id, async () => {
     const job = await readJob(id);
     if (!job) {
@@ -537,10 +546,19 @@ export async function approveReviewedRefund(id: string): Promise<JobRecord> {
     }
     const eventId = `guarantee_refund_${job.id}`;
     const seen = job.processedStripeEvents ?? [];
-    if (seen.includes(eventId)) {
+    if (job.refunded || seen.includes(eventId)) {
       return job;
     }
-    if (job.currency !== "USD" || job.priceMinor <= 0) {
+    if (job.status !== "waiting_for_buyer" || job.tenantId === DEMO_ORG_ID) {
+      throw new Error("refund is closed");
+    }
+    if (job.payment.mode !== "simulated" && job.payment.mode !== "stripe_test") {
+      throw new Error("refund is not a test payment");
+    }
+    if (/_live_/i.test(job.payment.id)) {
+      throw new Error("refund is not a test payment");
+    }
+    if (job.currency !== "USD" || !Number.isSafeInteger(job.priceMinor) || job.priceMinor <= 0) {
       throw new Error("amount does not match the order snapshot");
     }
     job.refunded = true;
