@@ -21,6 +21,9 @@ export function AgentCard({ locale, item }: { locale: string; item: CatalogItem 
         <Link className="underline-offset-4 hover:underline" href={`/${locale}/listings/${item.slug}`}>{item.name}</Link>
       </h3>
       <p className="mt-1 text-sm text-muted">{item.sellerName}</p>
+      {item.proof?.status === "complete" && item.proof.proven ? <p className="mt-2 text-sm">{t(locale, "card.beats", { wins: String(item.proof.wins), tests: String(item.proof.tests) })}</p> : null}
+      {item.proof?.status === "complete" && !item.proof.proven ? <p className="mt-2 text-sm">{t(locale, "card.notProven")}</p> : null}
+      {item.proof?.status === "queued" || item.proof?.status === "running" ? <p className="mt-2 text-sm">{t(locale, "card.proofRunning")}</p> : null}
       <p className="mt-3 text-sm leading-6">{item.pitch}</p>
       <p className="mt-3 text-sm">{rating}</p>
       <p className="text-sm text-muted">{runs}</p>

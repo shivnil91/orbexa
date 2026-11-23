@@ -87,6 +87,16 @@ export default async function SellerDashboardPage({
         )}
       </section>
       <section>
+        <h2 className="text-2xl font-semibold">{t(locale, "seller.queue")}</h2>
+        {sellerJobs.filter((job) => job.serviceLevel === "expert_review" && job.status === "waiting_for_expert").length === 0 ? <p className="mt-3 text-sm text-muted">{t(locale, "seller.queueEmpty")}</p> : (
+          <ul className="mt-3 grid gap-2">
+            {sellerJobs.filter((job) => job.serviceLevel === "expert_review" && job.status === "waiting_for_expert").map((job) => (
+              <li key={job.id}><Link className="underline" href={`/${locale}/sell/queue/${job.id}`}>{job.title}</Link></li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section>
         <h2 className="text-2xl font-semibold">{t(locale, "seller.orders")}</h2>
         {orders.length === 0 ? <p className="mt-3 text-sm text-muted">{t(locale, "seller.noOrders")}</p> : (
           <ul className="mt-3 grid gap-3">

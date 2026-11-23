@@ -7,6 +7,7 @@ import { describe, test } from "node:test";
 import {
   applyVerifiedStripePayment,
   applyVerifiedStripeRefund,
+  approveReviewedRefund,
   createJob,
   payJob,
   readConsent,
@@ -242,6 +243,44 @@ test("shared demo consent does not opt in another job", async () => {
     });
     await setJobConsent(owned.id, true);
     assert.equal(await readConsent(tenant), true);
+  } finally {
+    delete process.env.ORBEXA_JOB_DIR;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a reasoned rejection revises once, then a reviewed refund is idempotent", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-guarantee-"));
+  process.env.ORBEXA_JOB_DIR = directory;
+  try {
+    const job = await createJob({
+      locale: "en",
+      slug: "example-drawing-check",
+      tier: "autonomous",
+      intake: { need: "Check the drawing for a missing dimension" },
+      tenantId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    });
+    const paid = await payJob(job.id);
+    let current = paid;
+    while (current.status === "queued" || current.status === "running") {
+      current = await revealNext(current.id);
+    }
+    assert.equal(current.status, "waiting_for_buyer");
+    assert.equal(current.paragraphs.join("\n").includes("must be named"), false);
+    await assert.rejects(recordJobFeedback(job.id, { kind: "buyer_reject", reason: "short" }), /reason/);
+    const revised = await recordJobFeedback(job.id, { kind: "buyer_reject", reason: "The gap I asked about is still missing." });
+    assert.equal(revised.status, "waiting_for_buyer");
+    assert.equal(revised.guarantee?.revisionUsed, true);
+    assert.match(revised.paragraphs[0] ?? "", /free revision/);
+    const review = await recordJobFeedback(job.id, { kind: "buyer_reject", reason: "The revision still misses the dimension." });
+    assert.equal(review.guarantee?.refundRequested, true);
+    assert.equal(review.refunded, undefined);
+    await assert.rejects(recordJobFeedback(job.id, { kind: "buyer_approve" }), /review/);
+    const refunded = await approveReviewedRefund(job.id);
+    assert.equal(refunded.refunded, true);
+    assert.equal(refunded.status, "rejected");
+    const replay = await approveReviewedRefund(job.id);
+    assert.equal(replay.processedStripeEvents.filter((id) => id.startsWith("guarantee_refund_")).length, 1);
   } finally {
     delete process.env.ORBEXA_JOB_DIR;
     await rm(directory, { recursive: true, force: true });

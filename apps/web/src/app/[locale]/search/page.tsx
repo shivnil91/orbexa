@@ -61,6 +61,10 @@ export default async function SearchPage({
                     <Link className="underline-offset-4 hover:underline" href={`/${locale}/listings/${match.item.slug}`}>{match.item.name}</Link>
                   </h3>
                   <p className="mt-1 text-sm text-muted">{match.item.sellerName}</p>
+                  {match.item.proof?.status === "complete" && match.item.proof.proven ? (
+                    <p className="mt-2 text-sm"><span className="rounded-full bg-supported-bg px-2 py-0.5 text-supported">{t(locale, "card.proof")}</span> {t(locale, "card.beats", { wins: String(match.item.proof.wins), tests: String(match.item.proof.tests) })}</p>
+                  ) : null}
+                  {match.item.proof?.status === "complete" && !match.item.proof.proven ? <p className="mt-2 text-sm">{t(locale, "card.notProven")}</p> : null}
                   <p className="mt-3 text-sm leading-6">{match.item.pitch}</p>
                   <p className="mt-2 text-sm">{match.reason}</p>
                   <p className="mt-2 font-medium">{t(locale, "card.from", { price: formatMoney(BigInt(match.item.priceMinor), match.item.currency, locale) })}</p>

@@ -119,13 +119,30 @@ test("publish validation rejects a short instruction and accepts a complete agen
     exampleTitle: "Sample",
     exampleBody: "LC2 is not in the brief. No load was invented.",
     priceRaw: "40",
+    interview: [
+      { questionId: "good", answer: "Name each missing load case and leave the number blank." },
+      { questionId: "never", answer: "Never invent a measurement or a certificate." },
+      { questionId: "first", answer: "Look at the named cases first and ignore a guessed total." },
+      { questionId: "mistake", answer: "A general model fills a gap with a plausible number." },
+      { questionId: "incomplete", answer: "When the brief is incomplete, mark the item missing." },
+    ],
   };
   assert.equal(validateAgent({ ...input, instructions: "too short" }, "publish").ok, false);
   const saved = validateAgent(input, "publish");
   assert.equal(saved.ok, true);
-  if (saved.ok) {
+    if (saved.ok) {
     assert.equal(saved.value.priceMinor, 4000);
   }
+  const thin = validateAgent({
+    ...input,
+    interview: [
+      { questionId: "good", answer: "aaaaaaaa" },
+      { questionId: "never", answer: "bbbbbbbb" },
+      { questionId: "first", answer: "cccccccc" },
+      { questionId: "mistake", answer: "dddddddd" },
+    ],
+  }, "publish");
+  assert.equal(thin.ok, false);
 });
 
 test("open redirects are refused", () => {
@@ -194,6 +211,11 @@ describe("accounts and connect", { concurrency: false }, () => {
       role: "seller",
       admin: false,
       connect: { mode: "simulated", accountId: null, chargesEnabled: false, detailsSubmitted: false },
+      experience: "",
+      links: [],
+      credentials: [],
+      trainingConsent: false,
+      photoDataUrl: "",
     };
     let calls = 0;
     const simulated = await beginConnectOnboarding({

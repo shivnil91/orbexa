@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { packFor, transcriptFor, type DemoRun, type ServiceLevel } from "./catalog.ts";
 import { readDb } from "./demo-store.ts";
-import { publishedListing, sandboxReply } from "./marketplace.ts";
+import { publishedListing } from "./marketplace.ts";
+import { buyerDraft, retrieveAssets, revisionDraft } from "./trust.ts";
 import { validateFeedback, type FeedbackInput, type FeedbackKind } from "@orbexa/db/feedback.ts";
 import { validateIntake } from "./intake.ts";
 import {
@@ -76,6 +77,14 @@ export type JobRecord = {
   sellerId?: string;
   createdAt?: number;
   stripeCheckoutUrl?: string;
+  retrievedCount?: number;
+  revisionCount?: number;
+  guarantee?: {
+    revisionUsed: boolean;
+    revisionReason: string;
+    refundRequested: boolean;
+    refundReason: string;
+  };
 };
 
 const locks = new Map<string, Promise<unknown>>();
@@ -137,7 +146,8 @@ export async function createJob(input: {
   }
   const name = intake.opportunity_name ?? intake.need;
   const transcript = transcriptFor(listing.vertical);
-  const knowledgeText = (listing.knowledge ?? []).map((note) => `${note.name}\n${note.text}`).join("\n");
+  const needText = typeof name === "string" ? name : "";
+  const retrievedCount = retrieveAssets(listing.assets ?? [], needText).length;
   const tenantId = input.tenantId && UUID.test(input.tenantId) ? input.tenantId : DEMO_ORG_ID;
   const job: JobRecord = {
     id: randomUUID(),
@@ -147,7 +157,8 @@ export async function createJob(input: {
     title: listing.title,
     serviceLevel: tier.serviceLevel,
     opportunityName: typeof name === "string" ? name : "",
-    instructions: [listing.instructions ?? "", knowledgeText].filter((part) => part.length > 0).join("\n\n"),
+    instructions: listing.instructions ?? "",
+    retrievedCount,
     sellerId: listing.sellerId,
     createdAt: Date.now(),
     currency: tier.currency,
@@ -358,11 +369,10 @@ export async function revealNext(id: string): Promise<JobRecord> {
       job.status = job.serviceLevel === "autonomous" ? "waiting_for_buyer" : "waiting_for_expert";
       job.finishedAt = Date.now();
       if (!job.transcript) {
-        job.paragraphs = sandboxReply({
+        job.paragraphs = buyerDraft({
           name: job.title,
-          instructions: job.instructions ?? "",
-          knowledge: "",
           need: job.opportunityName,
+          retrieved: job.retrievedCount ?? 0,
         });
       }
       await writeMetrics(job);
@@ -375,7 +385,7 @@ export async function revealNext(id: string): Promise<JobRecord> {
 
 export async function recordJobFeedback(
   id: string,
-  input: { kind: FeedbackKind; editDistance?: number | null; rating?: number | null },
+  input: { kind: FeedbackKind; editDistance?: number | null; rating?: number | null; reason?: string | null },
 ): Promise<JobRecord> {
   return withLock(id, async () => {
     const job = await readJob(id);
@@ -423,10 +433,29 @@ export async function recordJobFeedback(
       at: new Date().toISOString(),
     });
     if (input.kind === "buyer_approve" && job.status === "waiting_for_buyer") {
+      if (job.guarantee?.refundRequested) {
+        throw new Error("refund is in review");
+      }
       job.status = "accepted";
     }
     if (input.kind === "buyer_reject" && job.status === "waiting_for_buyer") {
-      job.status = "rejected";
+      const reason = (input.reason ?? "").trim();
+      if (reason.length < 8 || reason.length > 500) {
+        throw new Error("reason");
+      }
+      const guarantee = job.guarantee ?? { revisionUsed: false, revisionReason: "", refundRequested: false, refundReason: "" };
+      if (!guarantee.revisionUsed) {
+        guarantee.revisionUsed = true;
+        guarantee.revisionReason = reason;
+        job.guarantee = guarantee;
+        job.revisionCount = (job.revisionCount ?? 0) + 1;
+        const note = revisionDraft(reason);
+        job.paragraphs = job.transcript ? job.paragraphs.concat(note.slice(0, 2)) : note;
+      } else if (!guarantee.refundRequested) {
+        guarantee.refundRequested = true;
+        guarantee.refundReason = reason;
+        job.guarantee = guarantee;
+      }
     }
     await writeJob(job);
     return job;
@@ -442,11 +471,81 @@ export async function recordExpertSignal(id: string): Promise<JobRecord> {
     if (job.refunded || job.serviceLevel === "autonomous") {
       return job;
     }
+    if (job.serviceLevel === "expert_review") {
+      throw new Error("expert review is released by the seller");
+    }
     if (job.status !== "waiting_for_expert") {
       throw new Error("expert approval is not available for this job");
     }
     job.approvalSignal = "approve";
     job.status = "waiting_for_buyer";
+    await writeJob(job);
+    return job;
+  });
+}
+
+function paragraphsFrom(text: string): string[] {
+  return text
+    .replace(/\u0000/g, "")
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .slice(0, 8)
+    .map((part) => part.slice(0, 2000));
+}
+
+export async function saveExpertDraft(id: string, sellerId: string, text: string): Promise<JobRecord> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job || job.sellerId !== sellerId || job.serviceLevel !== "expert_review" || job.status !== "waiting_for_expert" || job.refunded) {
+      throw new Error("expert draft is not available");
+    }
+    const paragraphs = paragraphsFrom(text);
+    if (paragraphs.length === 0) {
+      throw new Error("draft is empty");
+    }
+    job.paragraphs = paragraphs;
+    await writeJob(job);
+    return job;
+  });
+}
+
+export async function releaseExpertReview(id: string, sellerId: string): Promise<JobRecord> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job || job.sellerId !== sellerId || job.serviceLevel !== "expert_review" || job.status !== "waiting_for_expert" || job.refunded) {
+      throw new Error("expert review is not available");
+    }
+    if (job.paragraphs.length === 0) {
+      throw new Error("draft is empty");
+    }
+    job.approvalSignal = "approve";
+    job.status = "waiting_for_buyer";
+    await writeJob(job);
+    return job;
+  });
+}
+
+export async function approveReviewedRefund(id: string): Promise<JobRecord> {
+  return withLock(id, async () => {
+    const job = await readJob(id);
+    if (!job) {
+      throw new Error("job not found");
+    }
+    if (!job.payment || !job.guarantee?.refundRequested) {
+      throw new Error("refund is not in review");
+    }
+    const eventId = `guarantee_refund_${job.id}`;
+    const seen = job.processedStripeEvents ?? [];
+    if (seen.includes(eventId)) {
+      return job;
+    }
+    if (job.currency !== "USD" || job.priceMinor <= 0) {
+      throw new Error("amount does not match the order snapshot");
+    }
+    job.refunded = true;
+    job.status = "rejected";
+    job.processedStripeEvents = [...seen, eventId];
     await writeJob(job);
     return job;
   });

@@ -213,6 +213,13 @@ describe("accounts, suspension, and connect status", { concurrency: false }, () 
         exampleTitle: "Sample",
         exampleBody: "LC2 is missing from the brief.",
         priceRaw: "40",
+        interview: [
+          { questionId: "good", answer: "Name each missing load case and leave the number blank." },
+          { questionId: "never", answer: "Never invent a measurement or a certificate." },
+          { questionId: "first", answer: "Look at the named cases first and ignore a guessed total." },
+          { questionId: "mistake", answer: "A general model fills a gap with a plausible number." },
+          { questionId: "incomplete", answer: "When the brief is incomplete, mark the item missing." },
+        ],
       };
       const saved = await saveAgent(created.user.id, input, "publish");
       assert.equal(saved.ok, true);
@@ -252,6 +259,11 @@ describe("accounts, suspension, and connect status", { concurrency: false }, () 
       role: "seller",
       admin: false,
       connect: { mode: "stripe_test", accountId: "acct_test123", chargesEnabled: true, detailsSubmitted: true },
+      experience: "",
+      links: [],
+      credentials: [],
+      trainingConsent: false,
+      photoDataUrl: "",
     };
     const env = { PAYMENT_PROVIDER: "stripe", STRIPE_TEST_SECRET_KEY: "sk_test_example", STRIPE_TEST_NETWORK: "1" };
     const off = await syncConnectAccount({ user, env: {}, transport: async () => ({ status: 200, body: "{}" }) });

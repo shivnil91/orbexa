@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
-import type { ConnectState, Role, UserRecord } from "./demo-store.ts";
+import type { ConnectState, CredentialRecord, ProfileLink, Role, UserRecord } from "./demo-store.ts";
 import { emptyConnect, readDb, updateDb } from "./demo-store.ts";
 import { isSupportedLocale } from "./locale.ts";
 
@@ -21,6 +21,11 @@ export type PublicUser = {
   role: Role;
   admin: boolean;
   connect: ConnectState;
+  experience: string;
+  links: ProfileLink[];
+  credentials: CredentialRecord[];
+  trainingConsent: boolean;
+  photoDataUrl: string;
 };
 
 export type AuthResult = { ok: true; token: string; user: PublicUser } | { ok: false; error: string };
@@ -92,6 +97,11 @@ export function toPublic(user: UserRecord, env: NodeJS.ProcessEnv = process.env)
     role: user.role,
     admin: user.operator === true && isAdminEmail(user.email, env),
     connect: user.connect ?? emptyConnect(),
+    experience: user.experience ?? "",
+    links: user.links ?? [],
+    credentials: user.credentials ?? [],
+    trainingConsent: user.trainingConsent === true,
+    photoDataUrl: user.photoDataUrl ?? "",
   };
 }
 
@@ -295,6 +305,90 @@ export async function updateAccount(userId: string, input: { name: string; bio: 
     return { ok: false, error: "missing" };
   }
   return { ok: true, user: toPublic(user) };
+}
+
+function cleanLinks(raw: ProfileLink[]): { ok: true; links: ProfileLink[] } | { ok: false; error: string } {
+  const links: ProfileLink[] = [];
+  for (const item of raw.slice(0, 3)) {
+    const label = item.label.trim().slice(0, 40);
+    const href = item.href.trim();
+    if (!label && !href) continue;
+    if (!label || !href.startsWith("https://") || href.length > 200 || /[\s<>]/.test(href)) {
+      return { ok: false, error: "link" };
+    }
+    links.push({ label, href });
+  }
+  return { ok: true, links };
+}
+
+export function acceptPhoto(dataUrl: string): { ok: true; photo: string } | { ok: false; error: string } {
+  if (!dataUrl) return { ok: true, photo: "" };
+  if (dataUrl.length > 60_000 || !/^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=\s]+$/i.test(dataUrl)) {
+    return { ok: false, error: "photo" };
+  }
+  return { ok: true, photo: dataUrl };
+}
+
+export async function updateProfile(
+  userId: string,
+  input: { experience: string; links: ProfileLink[]; credentialTitle: string; credentialIssuer: string; trainingConsent: boolean; photoDataUrl?: string },
+): Promise<{ ok: true; user: PublicUser } | { ok: false; error: string }> {
+  const experience = input.experience.trim();
+  if (experience.length > 400) return { ok: false, error: "experience" };
+  const links = cleanLinks(input.links);
+  if (!links.ok) return links;
+  const title = input.credentialTitle.trim().slice(0, 80);
+  const issuer = input.credentialIssuer.trim().slice(0, 80);
+  if ((title && !issuer) || (!title && issuer)) return { ok: false, error: "credential" };
+  const photo = input.photoDataUrl === undefined ? undefined : acceptPhoto(input.photoDataUrl);
+  if (photo && !photo.ok) return photo;
+  const user = await updateDb((db) => {
+    const current = db.users.find((item) => item.id === userId);
+    if (!current) return null;
+    current.experience = experience;
+    current.links = links.links;
+    current.trainingConsent = input.trainingConsent === true;
+    if (photo) current.photoDataUrl = photo.photo;
+    if (title && issuer) {
+      const credentials = current.credentials ?? [];
+      const exists = credentials.some((item) => item.title.toLowerCase() === title.toLowerCase() && item.issuer.toLowerCase() === issuer.toLowerCase());
+      if (!exists) {
+        credentials.push({ id: randomUUID(), title, issuer, status: "self_declared" });
+      }
+      current.credentials = credentials;
+    }
+    return current;
+  });
+  if (!user) return { ok: false, error: "missing" };
+  return { ok: true, user: toPublic(user) };
+}
+
+export async function verifyCredential(
+  actor: { id: string; admin: boolean },
+  userId: string,
+  credentialId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!actor.admin) return { ok: false, error: "forbidden" };
+  if (!/^[0-9a-f-]{36}$/i.test(credentialId)) return { ok: false, error: "missing" };
+  const result = await updateDb((db) => {
+    const current = db.users.find((item) => item.id === userId);
+    const credential = current?.credentials?.find((item) => item.id === credentialId);
+    if (!current || !credential) return "missing" as const;
+    if (credential.status !== "verified") {
+      credential.status = "verified";
+      db.audit = db.audit ?? [];
+      db.audit.push({
+        id: randomUUID(),
+        at: new Date().toISOString(),
+        actorId: actor.id,
+        action: "credential_verify",
+        targetId: current.id,
+        detail: credential.id,
+      });
+    }
+    return "ok" as const;
+  });
+  return result === "ok" ? { ok: true } : { ok: false, error: result };
 }
 
 export async function updateConnect(userId: string, connect: ConnectState): Promise<void> {

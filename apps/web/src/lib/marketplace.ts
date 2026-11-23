@@ -2,8 +2,27 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { parseAmountToMinor } from "@orbexa/db/money.ts";
 import type { Listing, Tier } from "./catalog.ts";
 import { listingBySlug } from "./catalog.ts";
-import type { AgentRecord, KnowledgeNote, MarketplaceDb, ReviewRecord } from "./demo-store.ts";
+import type { AgentRecord, AssetKind, ExpertReviewConfig, InterviewAnswer, KnowledgeAsset, KnowledgeNote, MarketplaceDb, ProofRecord, ReviewRecord } from "./demo-store.ts";
 import { emptyDb, readDb, updateDb } from "./demo-store.ts";
+import {
+  cleanInterview,
+  contentHash,
+  emptyTrack,
+  initials,
+  interviewCount,
+  knowledgeCounts,
+  proofGroup,
+  proofWeight,
+  publicCredentials,
+  publishInterviewReady,
+  safeLinks,
+  toPublicProof,
+  trackFromJobs,
+  trackWeight,
+  type PublicCredential,
+  type PublicProof,
+  type TrackRecord,
+} from "./trust.ts";
 
 export const EXAMPLE_SELLER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 export const EXAMPLE_SELLER_NAME = "Example seller";
@@ -69,6 +88,19 @@ export type CatalogItem = {
   createdAt: string;
   listing: Listing;
   reviews: PublicReview[];
+  assets: KnowledgeAsset[];
+  interview: InterviewAnswer[];
+  trainingConsent: boolean;
+  expertReview: ExpertReviewConfig;
+  proof: PublicProof | null;
+  knowledgeCounts: { kind: AssetKind; count: number }[];
+  interviewCount: number;
+  track: TrackRecord;
+  experience: string;
+  links: { label: string; href: string }[];
+  credentials: PublicCredential[];
+  initials: string;
+  photoDataUrl: string;
 };
 
 type ExampleAgent = {
@@ -229,6 +261,55 @@ export function tiersForPrice(priceMinor: number): Tier[] {
   ];
 }
 
+const OFF_REVIEW: ExpertReviewConfig = { enabled: false, priceMinor: 0, slaHours: 48 };
+
+export function expertReviewTier(priceMinor: number, review: ExpertReviewConfig): Tier | null {
+  if (!review.enabled) return null;
+  const led = Math.max(priceMinor + 100, Math.round(priceMinor * 1.8));
+  const floor = led + 100;
+  const asked = review.priceMinor >= floor ? review.priceMinor : Math.round(led * 1.35);
+  const price = Math.min(500_000, Math.max(floor, asked));
+  const slaHours = review.slaHours === 24 || review.slaHours === 72 ? review.slaHours : 48;
+  const reviewFee = Math.min(price - 1, Math.max(0, Math.round(price * 0.3)));
+  return {
+    serviceLevel: "expert_review",
+    currency: "USD",
+    priceMinor: price,
+    platformFeeBps: 1000,
+    creatorRoyaltyBps: 9000,
+    reviewFeeMinor: reviewFee,
+    deliveryDays: Math.max(1, Math.ceil(slaHours / 24)),
+    includedRevisions: 1,
+    cancellationCode: "before_draft_full_refund",
+    payoutRelease: "after_dispute_window",
+    slaHours,
+  };
+}
+
+export function tiersForAgent(priceMinor: number, review: ExpertReviewConfig = OFF_REVIEW): Tier[] {
+  const tiers = priceMinor >= 500 ? tiersForPrice(priceMinor) : [];
+  const extra = expertReviewTier(priceMinor, review);
+  return extra ? tiers.concat(extra) : tiers;
+}
+
+function blankTrust(example: boolean) {
+  return {
+    assets: [] as KnowledgeAsset[],
+    interview: [] as InterviewAnswer[],
+    trainingConsent: false,
+    expertReview: OFF_REVIEW,
+    proof: null as PublicProof | null,
+    knowledgeCounts: [] as { kind: AssetKind; count: number }[],
+    interviewCount: 0,
+    track: emptyTrack(example),
+    experience: "",
+    links: [] as { label: string; href: string }[],
+    credentials: [] as PublicCredential[],
+    initials: example ? "EX" : "?",
+    photoDataUrl: "",
+  };
+}
+
 function average(reviews: { rating: number }[]): { average: number | null; count: number } {
   if (reviews.length === 0) {
     return { average: null, count: 0 };
@@ -247,6 +328,7 @@ function listingFrom(input: {
   expertStatus: "verified" | "pending";
   instructions: string;
   knowledge: KnowledgeNote[];
+  assets?: Listing["assets"];
   sellerId: string;
 }): Listing {
   return {
@@ -261,6 +343,7 @@ function listingFrom(input: {
     tiers: input.tiers,
     instructions: input.instructions,
     knowledge: input.knowledge,
+    assets: input.assets,
     sellerId: input.sellerId,
   };
 }
@@ -313,6 +396,7 @@ export function buildCatalog(db: MarketplaceDb = emptyDb()): CatalogItem[] {
       createdAt: "2025-11-01T00:00:00.000Z",
       listing: { ...hospital, sellerId: EXAMPLE_SELLER_ID, instructions: "Use only the fixture notes. Cite a source for every claim. Leave gaps empty." },
       reviews: HOSPITAL_REVIEWS,
+      ...blankTrust(true),
     }, true));
   }
   for (const agent of EXAMPLES) {
@@ -354,6 +438,7 @@ export function buildCatalog(db: MarketplaceDb = emptyDb()): CatalogItem[] {
         sellerId: EXAMPLE_SELLER_ID,
       }),
       reviews,
+      ...blankTrust(true),
     }, true));
   }
   for (const agent of db.agents) {
@@ -361,8 +446,11 @@ export function buildCatalog(db: MarketplaceDb = emptyDb()): CatalogItem[] {
     const reviews = db.reviews
       .filter((review) => review.agentSlug === agent.slug)
       .map((review) => ({ ...review, example: false }));
-    const tiers = agent.priceMinor >= 500 ? tiersForPrice(agent.priceMinor) : [];
+    const expertReview = agent.expertReview ?? OFF_REVIEW;
+    const tiers = tiersForAgent(agent.priceMinor, expertReview);
     const status = db.overrides[agent.slug] ?? agent.status;
+    const assets = agent.assets ?? [];
+    const interview = agent.interview ?? [];
     items.push(withRatings({
       slug: agent.slug,
       name: agent.name,
@@ -395,9 +483,23 @@ export function buildCatalog(db: MarketplaceDb = emptyDb()): CatalogItem[] {
         expertStatus: "pending",
         instructions: agent.instructions,
         knowledge: agent.knowledge,
+        assets,
         sellerId: agent.ownerId,
       }),
       reviews,
+      assets,
+      interview,
+      trainingConsent: agent.trainingConsent === true,
+      expertReview,
+      proof: agent.proof ? toPublicProof(agent.proof) : null,
+      knowledgeCounts: knowledgeCounts(assets),
+      interviewCount: interviewCount(interview),
+      track: emptyTrack(false),
+      experience: seller?.experience ?? "",
+      links: safeLinks(seller?.links ?? []),
+      credentials: publicCredentials(seller?.credentials ?? []),
+      initials: initials(seller?.name ?? "Seller"),
+      photoDataUrl: seller?.photoDataUrl ?? "",
     }, false));
   }
   return items;
@@ -411,6 +513,13 @@ export function applyRunCounts(items: CatalogItem[], live: Record<string, number
     }
     return item;
   });
+}
+
+export function attachTrack(items: CatalogItem[], jobs: Parameters<typeof trackFromJobs>[0]): CatalogItem[] {
+  return items.map((item) => ({
+    ...item,
+    track: trackFromJobs(jobs, item.slug, item.reviews, item.example),
+  }));
 }
 
 export async function getCatalog(): Promise<CatalogItem[]> {
@@ -548,7 +657,11 @@ export function browseCatalog(items: CatalogItem[], query: BrowseQuery, pageSize
     if (sort === "rating") return (right.item.ratingAverage ?? -1) - (left.item.ratingAverage ?? -1);
     if (sort === "runs") return right.item.runs - left.item.runs;
     if (sort === "recommended") {
-      if (right.score !== left.score) return right.score - left.score;
+      const group = proofGroup(right.item.proof) - proofGroup(left.item.proof);
+      if (group !== 0) return group;
+      const leftRank = left.score * proofWeight(left.item.proof) * trackWeight(left.item.track);
+      const rightRank = right.score * proofWeight(right.item.proof) * trackWeight(right.item.track);
+      if (rightRank !== leftRank) return rightRank - leftRank;
       if (left.item.featured !== right.item.featured) return left.item.featured ? -1 : 1;
       return right.item.createdAt.localeCompare(left.item.createdAt);
     }
@@ -566,7 +679,13 @@ export function recommend(need: string, items: CatalogItem[]): { item: CatalogIt
     .filter((item) => item.status === "published")
     .map((item) => ({ item, score: scoreMatch(need, item), reason: matchReason(need, item) }))
     .filter((row) => row.score > 0)
-    .sort((left, right) => right.score - left.score || right.item.runs - left.item.runs);
+    .sort((left, right) => {
+      const group = proofGroup(right.item.proof) - proofGroup(left.item.proof);
+      if (group !== 0) return group;
+      const leftRank = left.score * proofWeight(left.item.proof) * trackWeight(left.item.track);
+      const rightRank = right.score * proofWeight(right.item.proof) * trackWeight(right.item.track);
+      return rightRank - leftRank || right.item.runs - left.item.runs;
+    });
 }
 
 export function sandboxReply(input: { name: string; instructions: string; knowledge: string; need: string }): string[] {
@@ -603,6 +722,10 @@ export type AgentInput = {
   category: string;
   instructions: string;
   knowledge: KnowledgeNote[];
+  assets?: KnowledgeAsset[];
+  interview?: InterviewAnswer[];
+  trainingConsent?: boolean;
+  expertReview?: ExpertReviewConfig;
   exampleTitle: string;
   exampleBody: string;
   priceRaw: string;
@@ -624,6 +747,14 @@ export function validateAgent(input: AgentInput, intent: "draft" | "publish"): {
   if (input.knowledge.some((note) => note.text.length > 60_000)) {
     return { ok: false, error: "knowledge" };
   }
+  const assets = (input.assets ?? []).filter((asset) => asset.text.trim().length > 0).slice(0, 8);
+  if (assets.some((asset) => asset.text.length > 60_000)) {
+    return { ok: false, error: "knowledge" };
+  }
+  const interview = cleanInterview(input.interview ?? []);
+  const expertReview = input.expertReview?.enabled
+    ? { enabled: true, priceMinor: input.expertReview.priceMinor, slaHours: input.expertReview.slaHours }
+    : OFF_REVIEW;
   const priceMinor = input.priceRaw.trim() ? parsePriceDollars(input.priceRaw) : 0;
   if (input.priceRaw.trim() && priceMinor == null) {
     return { ok: false, error: "price" };
@@ -635,6 +766,7 @@ export function validateAgent(input: AgentInput, intent: "draft" | "publish"): {
     if (instructions.length < 20) return { ok: false, error: "instructions" };
     if (exampleTitle.length < 2 || exampleBody.length < 8) return { ok: false, error: "output" };
     if (!priceMinor) return { ok: false, error: "price" };
+    if (!publishInterviewReady(interview)) return { ok: false, error: "interview" };
   }
   return {
     ok: true,
@@ -645,6 +777,10 @@ export function validateAgent(input: AgentInput, intent: "draft" | "publish"): {
       category: isCategory(input.category) ? input.category : "writing",
       instructions,
       knowledge: input.knowledge,
+      assets,
+      interview,
+      trainingConsent: input.trainingConsent === true,
+      expertReview,
       exampleTitle,
       exampleBody,
       priceMinor: priceMinor ?? 0,
@@ -665,7 +801,49 @@ function takenSlugs(db: MarketplaceDb): Set<string> {
   return new Set(["hospital-beds", "new", "dashboard", ...EXAMPLES.map((agent) => agent.slug), ...db.agents.map((agent) => agent.slug)]);
 }
 
-export async function saveAgent(ownerId: string, input: AgentInput, intent: "draft" | "publish" | "unpublish", slug?: string): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
+function applySellerMaterial(agent: AgentRecord, value: { assets?: KnowledgeAsset[]; interview?: InterviewAnswer[]; trainingConsent?: boolean; expertReview?: ExpertReviewConfig }): void {
+  agent.assets = value.assets ?? [];
+  agent.interview = value.interview ?? [];
+  agent.trainingConsent = value.trainingConsent === true;
+  agent.expertReview = value.expertReview ?? OFF_REVIEW;
+}
+
+function queueProof(agent: AgentRecord, now: string): void {
+  const examples = agent.exampleOutputs;
+  const hash = contentHash({
+    category: agent.category,
+    instructions: agent.instructions,
+    assets: agent.assets ?? [],
+    interview: agent.interview ?? [],
+    examples,
+  });
+  const changed = hash !== agent.contentHash;
+  agent.version = changed ? (agent.version ?? 0) + 1 : (agent.version ?? 1);
+  agent.contentHash = hash;
+  const proof: ProofRecord = {
+    id: randomUUID(),
+    version: agent.version,
+    status: "queued",
+    startedAt: now,
+    finishedAt: null,
+    model: "pending",
+    judgeModel: "pending",
+    fixture: true,
+    tests: 0,
+    wins: 0,
+    ties: 0,
+    losses: 0,
+    winRate: 0,
+    proven: false,
+    rubric: [],
+    examples: [],
+    costMinor: 0,
+    capped: false,
+  };
+  agent.proof = proof;
+}
+
+export async function saveAgent(ownerId: string, input: AgentInput, intent: "draft" | "publish" | "unpublish", slug?: string): Promise<{ ok: true; slug: string; proofQueued: boolean } | { ok: false; error: string }> {
   const validated = validateAgent(input, intent === "publish" ? "publish" : "draft");
   if (!validated.ok) {
     return validated;
@@ -689,17 +867,19 @@ export async function saveAgent(ownerId: string, input: AgentInput, intent: "dra
         existing.category = value.category;
         existing.instructions = value.instructions;
         existing.knowledge = value.knowledge;
+        applySellerMaterial(existing, value);
         existing.exampleOutputs = outputs.length > 0 ? outputs : existing.exampleOutputs;
         existing.priceMinor = value.priceMinor || existing.priceMinor;
         existing.updatedAt = now;
         if (intent === "publish") {
           existing.status = "published";
           existing.publishedAt = existing.publishedAt ?? now;
+          queueProof(existing, now);
         } else if (intent === "unpublish" && !db.overrides[existing.slug]) {
           existing.status = "draft";
           existing.publishedAt = null;
         }
-        return existing.slug;
+        return { slug: existing.slug, proofQueued: intent === "publish" };
       }
       const created: AgentRecord = {
         id: randomUUID(),
@@ -719,8 +899,10 @@ export async function saveAgent(ownerId: string, input: AgentInput, intent: "dra
         updatedAt: now,
         publishedAt: intent === "publish" ? now : null,
       };
+      applySellerMaterial(created, value);
+      if (intent === "publish") queueProof(created, now);
       db.agents.push(created);
-      return created.slug;
+      return { slug: created.slug, proofQueued: intent === "publish" };
     });
     if (saved === "suspended") {
       return { ok: false, error: "suspended" };
@@ -728,7 +910,7 @@ export async function saveAgent(ownerId: string, input: AgentInput, intent: "dra
     if (!saved) {
       return { ok: false, error: "missing" };
     }
-    return { ok: true, slug: saved };
+    return { ok: true, slug: saved.slug, proofQueued: saved.proofQueued };
   } catch {
     return { ok: false, error: "store" };
   }

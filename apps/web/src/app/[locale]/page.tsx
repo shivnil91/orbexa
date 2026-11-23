@@ -3,10 +3,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { AgentCard } from "@/components/agent-card";
+import { ProofPanel } from "@/components/proof-panel";
 import { primaryButton, secondaryButton } from "@/components/styles";
 import { t } from "@/lib/i18n";
 import { isSupportedLocale } from "@/lib/locale";
 import { CATEGORIES } from "@/lib/marketplace";
+import { exampleHarnessProof } from "@/lib/proof";
+import { toPublicProof } from "@/lib/trust";
 import { loadCatalog } from "@/server/catalog";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -21,6 +24,8 @@ export default async function LocaleHome({ params }: { params: Promise<{ locale:
     notFound();
   }
   const published = (await loadCatalog()).filter((item) => item.status === "published");
+  const liveProof = published.find((item) => item.proof?.status === "complete" && item.proof.examples.length > 0 && !item.example)?.proof;
+  const proof = liveProof ?? toPublicProof(await exampleHarnessProof(), true);
   const featured = published.filter((item) => item.featured).slice(0, 3);
   const trending = [...published].sort((left, right) => right.runs - left.runs).slice(0, 4);
   const newest = [...published].sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, 4);
@@ -39,6 +44,24 @@ export default async function LocaleHome({ params }: { params: Promise<{ locale:
           <Link className={primaryButton} href={`/${locale}/sell`}>{t(locale, "home.primary")}</Link>
           <Link className={secondaryButton} href={`/${locale}/search`}>{t(locale, "home.secondary")}</Link>
         </div>
+      </section>
+      <section className="grid gap-4" aria-labelledby="why-title">
+        <h2 id="why-title" className="text-2xl font-semibold">{t(locale, "home.whyTitle")}</h2>
+        <p className="max-w-3xl leading-7 text-muted">{t(locale, "home.whyBody")}</p>
+        {proof.example ? <p className="text-sm text-muted">{t(locale, "home.whyExample")}</p> : null}
+        <ProofPanel locale={locale} proof={proof} />
+      </section>
+      <section aria-labelledby="beach-title">
+        <h2 id="beach-title" className="text-2xl font-semibold">{t(locale, "home.beachTitle")}</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">{t(locale, "home.beachBody")}</p>
+        <ul className="mt-4 grid gap-3 lg:grid-cols-3">
+          {(["home.beach1", "home.beach2", "home.beach3"] as const).map((key) => (
+            <li key={key} className="rounded-2xl border border-line bg-surface p-4">
+              <h3 className="font-medium">{t(locale, `${key}.title`)}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted">{t(locale, `${key}.body`)}</p>
+            </li>
+          ))}
+        </ul>
       </section>
       <section>
         <h2 className="text-2xl font-semibold">{t(locale, "home.categories")}</h2>

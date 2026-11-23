@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { SubmitButton } from "@/components/submit-button";
 import { pageClass } from "@/components/styles";
+import { readDb } from "@/lib/demo-store";
 import { formatMoney } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { jobStatusKey, orderSummary } from "@/lib/job-access";
@@ -27,7 +28,12 @@ export default async function AdminPage({ params }: { params: Promise<{ locale: 
     );
   }
   const items = await loadCatalog();
-  const orders = (await listJobs()).slice(0, 40).map(orderSummary);
+  const jobs = await listJobs();
+  const orders = jobs.slice(0, 40).map(orderSummary);
+  const refunds = jobs.filter((job) => job.guarantee?.refundRequested && job.refunded !== true);
+  const db = await readDb();
+  const credentials = db.users.flatMap((person) => (person.credentials ?? []).filter((item) => item.status === "self_declared").map((item) => ({ userId: person.id, name: person.name, ...item })));
+  const audit = (db.audit ?? []).slice(-20).reverse();
   return (
     <main id="content" className={pageClass}>
       <header>
@@ -51,6 +57,52 @@ export default async function AdminPage({ params }: { params: Promise<{ locale: 
             </li>
           ))}
         </ul>
+      </section>
+      <section>
+        <h2 className="text-2xl font-semibold">{t(locale, "admin.credentials")}</h2>
+        {credentials.length === 0 ? <p className="mt-3 text-sm text-muted">{t(locale, "admin.noCredentials")}</p> : (
+          <ul className="mt-3 grid gap-3">
+            {credentials.map((credential) => (
+              <li key={credential.id} className="rounded-2xl border border-line p-4 text-sm">
+                <p>{credential.name} · {credential.title} · {credential.issuer} · {t(locale, "listing.selfDeclared")}</p>
+                <form action="/api/admin/credentials" className="mt-3" method="post">
+                  <input name="locale" type="hidden" value={locale} />
+                  <input name="userId" type="hidden" value={credential.userId} />
+                  <input name="credentialId" type="hidden" value={credential.id} />
+                  <SubmitButton label={t(locale, "admin.verify")} pendingLabel={t(locale, "pending")} />
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section>
+        <h2 className="text-2xl font-semibold">{t(locale, "admin.refunds")}</h2>
+        {refunds.length === 0 ? <p className="mt-3 text-sm text-muted">{t(locale, "admin.noRefunds")}</p> : (
+          <ul className="mt-3 grid gap-3">
+            {refunds.map((job) => (
+              <li key={job.id} className="rounded-2xl border border-line p-4 text-sm">
+                <p className="font-medium">{job.title}</p>
+                <p className="mt-1">{job.guarantee?.refundReason}</p>
+                <form action="/api/admin/refunds" className="mt-3" method="post">
+                  <input name="locale" type="hidden" value={locale} />
+                  <input name="job" type="hidden" value={job.id} />
+                  <SubmitButton label={t(locale, "admin.approveRefund")} pendingLabel={t(locale, "pending")} />
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section>
+        <h2 className="text-2xl font-semibold">{t(locale, "admin.audit")}</h2>
+        {audit.length === 0 ? <p className="mt-3 text-sm text-muted">{t(locale, "orders.empty")}</p> : (
+          <ul className="mt-3 grid gap-1 text-sm">
+            {audit.map((event) => (
+              <li key={event.id}>{event.at} · {event.action} · {event.targetId}</li>
+            ))}
+          </ul>
+        )}
       </section>
       <section>
         <h2 className="text-2xl font-semibold">{t(locale, "admin.orders")}</h2>

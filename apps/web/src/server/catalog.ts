@@ -1,6 +1,7 @@
-import { runCounts } from "@/lib/jobs";
-import { applyRunCounts, getCatalog, type CatalogItem } from "@/lib/marketplace";
+import { listJobs, runCounts } from "@/lib/jobs";
+import { applyRunCounts, attachTrack, getCatalog, type CatalogItem } from "@/lib/marketplace";
 
 export async function loadCatalog(): Promise<CatalogItem[]> {
-  return applyRunCounts(await getCatalog(), await runCounts());
+  const [items, counts, jobs] = await Promise.all([getCatalog(), runCounts(), listJobs()]);
+  return attachTrack(applyRunCounts(items, counts), jobs);
 }
