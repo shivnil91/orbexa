@@ -11,11 +11,14 @@ import {
   applyVerifiedStripeRefund,
   approveReviewedRefund,
   createJob,
+  deliverPaidDraft,
+  MODEL_MAX_ATTEMPTS,
   payJob,
   readConsent,
   readJob,
   recordExpertSignal,
   recordJobFeedback,
+  refundUnreleasedJob,
   releaseExpertReview,
   revealNext,
   saveExpertDraft,
@@ -254,6 +257,222 @@ test("shared demo consent does not opt in another job", async () => {
   }
 });
 
+test("a paid everyday job returns the draft without another step", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-jobs-"));
+  const previous = {
+    provider: process.env.PAYMENT_PROVIDER,
+    key: process.env.STRIPE_TEST_SECRET_KEY,
+    network: process.env.STRIPE_TEST_NETWORK,
+    webhook: process.env.STRIPE_TEST_WEBHOOK_SECRET,
+  };
+  process.env.ORBEXA_JOB_DIR = directory;
+  delete process.env.PAYMENT_PROVIDER;
+  delete process.env.STRIPE_TEST_SECRET_KEY;
+  delete process.env.STRIPE_TEST_NETWORK;
+  delete process.env.STRIPE_TEST_WEBHOOK_SECRET;
+  try {
+    const job = await createJob({
+      locale: "en",
+      slug: "example-support-reply",
+      tier: "autonomous",
+      intake: { need: "Draft a calm support reply" },
+    });
+    const paid = await payJob(job.id);
+    assert.equal(paid.status, "waiting_for_buyer");
+    assert.match(paid.paragraphs.join("\n"), /Thanks for writing about the catering order/);
+    assert.equal(paid.paragraphs.join("\n").includes("Instructions used"), false);
+    assert.equal(paid.paragraphs.join("\n").toLowerCase().includes("fixture"), false);
+    let called = false;
+    const again = await refundUnreleasedJob(paid.id, async () => {
+      called = true;
+      throw new Error("released draft");
+    });
+    assert.equal(called, false);
+    assert.equal(again?.refunded, undefined);
+    assert.equal(again?.status, "waiting_for_buyer");
+  } finally {
+    restoreEnv(previous);
+    delete process.env.ORBEXA_JOB_DIR;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a draft is not run or refunded before payment", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-jobs-"));
+  const previous = process.env.ANTHROPIC_API_KEY;
+  process.env.ORBEXA_JOB_DIR = directory;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test-key-not-a-secret-value";
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = (async () => {
+    called = true;
+    throw new Error("should not run");
+  }) as typeof fetch;
+  try {
+    const job = await createJob({
+      locale: "en",
+      slug: "example-support-reply",
+      tier: "autonomous",
+      intake: { need: "Draft a calm support reply" },
+    });
+    const delivered = await deliverPaidDraft(job.id);
+    assert.equal(called, false);
+    assert.equal(delivered.status, "checkout");
+    assert.equal(delivered.payment, null);
+    const refunded = await refundUnreleasedJob(job.id, async () => {
+      throw new Error("unpaid");
+    });
+    assert.equal(refunded?.refunded, undefined);
+    assert.equal(refunded?.status, "checkout");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previous;
+    delete process.env.ORBEXA_JOB_DIR;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a model-backed job waits for the provider and refunds when it fails", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-jobs-"));
+  const previous = {
+    provider: process.env.PAYMENT_PROVIDER,
+    key: process.env.STRIPE_TEST_SECRET_KEY,
+    network: process.env.STRIPE_TEST_NETWORK,
+    webhook: process.env.STRIPE_TEST_WEBHOOK_SECRET,
+    anthropic: process.env.ANTHROPIC_API_KEY,
+  };
+  const originalFetch = globalThis.fetch;
+  process.env.ORBEXA_JOB_DIR = directory;
+  delete process.env.PAYMENT_PROVIDER;
+  delete process.env.STRIPE_TEST_SECRET_KEY;
+  delete process.env.STRIPE_TEST_NETWORK;
+  delete process.env.STRIPE_TEST_WEBHOOK_SECRET;
+  delete process.env.ORBEXA_MODEL_HOURLY_CAP;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test-key-not-a-secret-value";
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    throw new Error("provider down sk-ant-test-key-not-a-secret-value Draft a calm support reply");
+  }) as typeof fetch;
+  try {
+    const job = await createJob({
+      locale: "en",
+      slug: "example-support-reply",
+      tier: "autonomous",
+      intake: { need: "Draft a calm support reply" },
+    });
+    const stepped = await revealNext(job.id);
+    assert.equal(stepped.status, "checkout");
+    const paid = await payJob(job.id);
+    assert.equal(paid.modelDelivery, true);
+    assert.equal(paid.status, "running");
+    assert.equal(paid.paragraphs.length, 0);
+    const held = await revealNext(paid.id);
+    assert.equal(held.cursor, 0);
+    assert.equal(held.status, "running");
+    assert.equal(calls, 0);
+    const failed = await deliverPaidDraft(paid.id);
+    assert.equal(failed.refunded, undefined);
+    assert.equal(failed.modelError, "provider");
+    assert.equal(failed.modelAttempts, 1);
+    assert.equal(failed.paragraphs.length, 0);
+    assert.equal(JSON.stringify(failed).includes("sk-ant-test"), false);
+    assert.equal(JSON.stringify(failed).includes("provider down"), false);
+    const marked = await refundUnreleasedJob(failed.id, async () => {
+      throw new Error("simulated payment has no Stripe charge");
+    });
+    assert.equal(marked?.refunded, true);
+    assert.equal(marked?.status, "rejected");
+    const replay = await refundUnreleasedJob(failed.id, async () => {
+      throw new Error("second refund");
+    });
+    assert.equal(replay?.refunded, true);
+    assert.equal(calls, 1);
+    for (let extra = 0; extra < 3; extra += 1) {
+      await deliverPaidDraft(failed.id);
+    }
+    assert.equal(calls, 1);
+
+    const retry = await createJob({
+      locale: "en",
+      slug: "example-support-reply",
+      tier: "autonomous",
+      intake: { need: "Draft a calm support reply" },
+    });
+    const retryPaid = await payJob(retry.id);
+    const first = await deliverPaidDraft(retryPaid.id);
+    const second = await deliverPaidDraft(retryPaid.id);
+    const third = await deliverPaidDraft(retryPaid.id);
+    assert.equal(first.modelAttempts, 1);
+    assert.equal(second.modelAttempts, 2);
+    assert.equal(third.modelAttempts, MODEL_MAX_ATTEMPTS);
+    assert.equal(calls, 3);
+
+    const stripeJob = JSON.parse(await readFile(path.join(directory, `${retry.id}.json`), "utf8")) as {
+      payment: { id: string; mode: string };
+      refunded?: boolean;
+    };
+    stripeJob.payment.id = "cs_test_failed";
+    stripeJob.payment.mode = "stripe_test";
+    stripeJob.refunded = undefined;
+    await writeFile(path.join(directory, `${retry.id}.json`), JSON.stringify(stripeJob));
+    process.env.PAYMENT_PROVIDER = "stripe";
+    process.env.STRIPE_TEST_SECRET_KEY = "sk_test_example";
+    process.env.STRIPE_TEST_NETWORK = "1";
+    let stripeCalls = 0;
+    const stripeRefund = await refundUnreleasedJob(retry.id, async (call) => {
+      stripeCalls += 1;
+      assert.equal(new URL(call.url).host, "api.stripe.com");
+      if (call.method === "GET") {
+        const stored = JSON.parse(await readFile(path.join(directory, `${retry.id}.json`), "utf8")) as { priceMinor: number; currency: string };
+        return {
+          status: 200,
+          body: JSON.stringify({
+            livemode: false,
+            amount_total: stored.priceMinor,
+            currency: stored.currency.toLowerCase(),
+            payment_status: "paid",
+            payment_intent: { id: "pi_test_failed", livemode: false, amount: stored.priceMinor, currency: stored.currency.toLowerCase() },
+          }),
+        };
+      }
+      const params = new URLSearchParams(call.body);
+      const stored = JSON.parse(await readFile(path.join(directory, `${retry.id}.json`), "utf8")) as { priceMinor: number };
+      assert.equal(params.get("amount"), String(stored.priceMinor));
+      assert.equal(call.headers["idempotency-key"], `refund_${retry.id}`);
+      assert.equal(params.get("reverse_transfer"), null);
+      return {
+        status: 200,
+        body: JSON.stringify({ id: "re_test_failed", livemode: false, amount: Number(params.get("amount")), status: "succeeded", payment_intent: "pi_test_failed" }),
+      };
+    });
+    assert.equal(stripeRefund?.refunded, true);
+    assert.equal(stripeCalls, 2);
+    stripeCalls = 0;
+    await refundUnreleasedJob(retry.id, async () => {
+      stripeCalls += 1;
+      throw new Error("second stripe refund");
+    });
+    assert.equal(stripeCalls, 0);
+    const saved = JSON.parse(await readFile(path.join(directory, `${retry.id}.json`), "utf8")) as { refunded?: boolean };
+    saved.refunded = false;
+    await writeFile(path.join(directory, `${retry.id}.json`), JSON.stringify(saved));
+    await assert.rejects(refundUnreleasedJob(retry.id, async () => ({
+      status: 200,
+      body: JSON.stringify({ livemode: true, amount_total: 1, currency: "usd", payment_status: "paid", payment_intent: "pi_test_failed" }),
+    })), /live mode/);
+    const unchanged = await readJob(retry.id);
+    assert.equal(unchanged?.refunded, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous.anthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previous.anthropic;
+    restoreEnv(previous);
+    delete process.env.ORBEXA_JOB_DIR;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 test("a reasoned rejection revises once, then a reviewed refund is idempotent", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-guarantee-"));
   process.env.ORBEXA_JOB_DIR = directory;
@@ -306,7 +525,6 @@ test("a reasoned rejection revises once, then a reviewed refund is idempotent", 
     await rm(directory, { recursive: true, force: true });
   }
 });
-
 test("an accepted order cannot be refunded, and a seller cannot open another seller's review", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "orbexa-guarantee-closed-"));
   const previous = { jobs: process.env.ORBEXA_JOB_DIR, demo: process.env.ORBEXA_DEMO_DIR };
@@ -387,6 +605,7 @@ test("an accepted order cannot be refunded, and a seller cannot open another sel
     await rm(directory, { recursive: true, force: true });
   }
 });
+
 });
 
 function restoreEnv(previous: { provider?: string; key?: string; network?: string; webhook?: string }) {

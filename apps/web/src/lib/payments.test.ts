@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LiveStripeKeyError, checkoutPlan, sendStripeTestCheckout, stripeTestTransport, verifyStripeTestWebhook } from "./payments.ts";
+import { LiveStripeKeyError, checkoutPlan, sendStripeTestCheckout, sendStripeTestRefund, stripeTestTransport, verifyStripeTestWebhook } from "./payments.ts";
 
 const orderId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
@@ -131,4 +131,57 @@ test("a stripe test webhook checks the signature and the event allow-list", () =
     () => verifyStripeTestWebhook(body, sign(body), { ...env, STRIPE_TEST_WEBHOOK_SECRET: "whsec_sk_live_hidden" }),
     LiveStripeKeyError,
   );
+});
+
+test("a Stripe test refund uses the order amount, an idempotency key, and refuses live mode", async () => {
+  const env = { PAYMENT_PROVIDER: "stripe", STRIPE_TEST_SECRET_KEY: "sk_test_example", STRIPE_TEST_NETWORK: "1" };
+  const input = { orderId, sessionId: "cs_test_order", amountMinor: 1500, currency: "USD" };
+  await assert.rejects(sendStripeTestRefund(input, { PAYMENT_PROVIDER: "stripe", STRIPE_TEST_SECRET_KEY: "sk_test_example" }, async () => {
+    throw new Error("network");
+  }), /not enabled/);
+  await assert.rejects(sendStripeTestRefund(input, { ...env, STRIPE_TEST_SECRET_KEY: "sk_live_refused" }, async () => {
+    throw new Error("network");
+  }), LiveStripeKeyError);
+  let calls = 0;
+  const refunded = await sendStripeTestRefund(input, env, async (call) => {
+    calls += 1;
+    assert.equal(new URL(call.url).host, "api.stripe.com");
+    assert.equal(call.headers.authorization, "Bearer sk_test_example");
+    if (call.method === "GET") {
+      return {
+        status: 200,
+        body: JSON.stringify({
+          id: "cs_test_order",
+          livemode: false,
+          amount_total: 1500,
+          currency: "usd",
+          payment_status: "paid",
+          payment_intent: { id: "pi_test_order", livemode: false, amount: 1500, currency: "usd", transfer_data: { destination: "acct_seller123" } },
+        }),
+      };
+    }
+    const params = new URLSearchParams(call.body);
+    assert.equal(params.get("amount"), "1500");
+    assert.equal(params.get("payment_intent"), "pi_test_order");
+    assert.equal(params.get("metadata[order_id]"), orderId);
+    assert.equal(params.get("reverse_transfer"), "true");
+    assert.equal(params.get("refund_application_fee"), "true");
+    assert.equal(call.headers["idempotency-key"], `refund_${orderId}`);
+    return { status: 200, body: JSON.stringify({ id: "re_test_order", livemode: false, amount: 1500, status: "succeeded", payment_intent: "pi_test_order" }) };
+  });
+  assert.equal(refunded.id, "re_test_order");
+  assert.equal(calls, 2);
+  await assert.rejects(sendStripeTestRefund(input, env, async () => ({
+    status: 200,
+    body: JSON.stringify({ id: "cs_test_order", livemode: true, amount_total: 1500, currency: "usd", payment_status: "paid", payment_intent: "pi_test_order" }),
+  })), /live mode/);
+  await assert.rejects(sendStripeTestRefund(input, env, async (call) => {
+    if (call.method === "GET") {
+      return {
+        status: 200,
+        body: JSON.stringify({ id: "cs_test_order", livemode: false, amount_total: 999, currency: "usd", payment_status: "paid", payment_intent: { id: "pi_test_order", livemode: false, amount: 999, currency: "usd" } }),
+      };
+    }
+    throw new Error("refund should not be sent");
+  }), /snapshot/);
 });

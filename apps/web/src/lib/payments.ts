@@ -243,6 +243,133 @@ export async function sendStripeTestCheckout(
   return { id: parsed.id };
 }
 
+function readJson(body: string): unknown {
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    throw new Error("Stripe test API returned an unreadable body");
+  }
+}
+
+export async function sendStripeTestRefund(
+  input: { orderId: string; sessionId: string; amountMinor: number; currency: string },
+  env: NodeJS.ProcessEnv,
+  transport: StripeTransport,
+): Promise<{ id: string }> {
+  const key = stripeTestEnabled(env);
+  if (!UUID.test(input.orderId)) {
+    throw new Error("order id is not a uuid");
+  }
+  if (!/^cs_test_[A-Za-z0-9]+$/.test(input.sessionId)) {
+    throw new Error("Stripe test session id was not returned");
+  }
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0) {
+    throw new Error("refund amount is invalid");
+  }
+  if (!CURRENCY.test(input.currency)) {
+    throw new Error("order currency is invalid");
+  }
+  const sessionUrl = new URL(`https://api.stripe.com/v1/checkout/sessions/${input.sessionId}`);
+  sessionUrl.searchParams.append("expand[]", "payment_intent");
+  const sessionResult = await transport({
+    url: sessionUrl.toString(),
+    method: "GET",
+    headers: { authorization: `Bearer ${key}` },
+    body: "",
+  });
+  if (sessionResult.status < 200 || sessionResult.status >= 300) {
+    throw new Error(`Stripe test API returned ${sessionResult.status}`);
+  }
+  const session = readJson(sessionResult.body) as {
+    livemode?: boolean;
+    amount_total?: number;
+    currency?: string;
+    payment_status?: string;
+    payment_intent?: string | {
+      id?: string;
+      livemode?: boolean;
+      amount?: number;
+      currency?: string;
+      transfer_data?: { destination?: string } | null;
+    };
+  };
+  if (session.livemode !== false) {
+    throw new Error("live mode checkout rejected");
+  }
+  if (session.payment_status !== "paid") {
+    throw new Error("Stripe test checkout is not paid");
+  }
+  if (session.amount_total !== input.amountMinor) {
+    throw new Error("Stripe test amount does not match the order snapshot");
+  }
+  if (String(session.currency ?? "").toUpperCase() !== input.currency.toUpperCase()) {
+    throw new Error("Stripe test currency does not match the order snapshot");
+  }
+  const intent = session.payment_intent;
+  const paymentIntentId = typeof intent === "string" ? intent : intent?.id ?? "";
+  if (!/^pi_[A-Za-z0-9_]+$/.test(paymentIntentId)) {
+    throw new Error("Stripe test payment was not captured");
+  }
+  let reverseTransfer = false;
+  if (intent && typeof intent === "object") {
+    if (intent.livemode !== false) {
+      throw new Error("live mode checkout rejected");
+    }
+    if (intent.amount !== input.amountMinor) {
+      throw new Error("Stripe test amount does not match the order snapshot");
+    }
+    if (String(intent.currency ?? "").toUpperCase() !== input.currency.toUpperCase()) {
+      throw new Error("Stripe test currency does not match the order snapshot");
+    }
+    reverseTransfer = typeof intent.transfer_data?.destination === "string" && /^acct_[A-Za-z0-9]+$/.test(intent.transfer_data.destination);
+  }
+  const body = new URLSearchParams({
+    payment_intent: paymentIntentId,
+    amount: String(input.amountMinor),
+    "metadata[order_id]": input.orderId,
+  });
+  if (reverseTransfer) {
+    body.set("refund_application_fee", "true");
+    body.set("reverse_transfer", "true");
+  }
+  const refundResult = await transport({
+    url: "https://api.stripe.com/v1/refunds",
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${key}`,
+      "content-type": "application/x-www-form-urlencoded",
+      "idempotency-key": `refund_${input.orderId}`,
+    },
+    body: body.toString(),
+  });
+  if (refundResult.status < 200 || refundResult.status >= 300) {
+    throw new Error(`Stripe test API returned ${refundResult.status}`);
+  }
+  const refund = readJson(refundResult.body) as {
+    id?: string;
+    livemode?: boolean;
+    amount?: number;
+    status?: string;
+    payment_intent?: string;
+  };
+  if (refund.livemode !== false) {
+    throw new Error("live mode checkout rejected");
+  }
+  if (refund.status !== "succeeded" && refund.status !== "pending") {
+    throw new Error("Stripe test refund is not succeeded");
+  }
+  if (refund.amount !== input.amountMinor) {
+    throw new Error("Stripe test amount does not match the order snapshot");
+  }
+  if (refund.payment_intent !== paymentIntentId) {
+    throw new Error("Stripe test payment was not captured");
+  }
+  if (!refund.id || !/^re_[A-Za-z0-9_]+$/.test(refund.id)) {
+    throw new Error("Stripe test refund id was not returned");
+  }
+  return { id: refund.id };
+}
+
 function headerValue(signature: string, name: string): string | undefined {
   const parts = signature.split(",");
   for (const part of parts) {

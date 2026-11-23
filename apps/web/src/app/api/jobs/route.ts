@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import type { ServiceLevel } from "@/lib/catalog";
-import { createJob } from "@/lib/jobs";
+import { createJob, payJob } from "@/lib/jobs";
 import { getCatalog, isListingSlug } from "@/lib/marketplace";
+import { stripeTestTransport } from "@/lib/payments";
 import { appUrl, formLocale, redirectTo } from "@/server/http";
 import { currentUser } from "@/server/session";
 
@@ -29,6 +30,25 @@ export async function POST(request: Request) {
   }
   try {
     const job = await createJob({ locale, slug, tier: tier as ServiceLevel, intake, tenantId: user?.id });
+    if (String(form.get("pay") ?? "") === "1") {
+      try {
+        const origin = appUrl(request, "/").origin;
+        const paid = await payJob(job.id, stripeTestTransport, {
+          successUrl: `${origin}/${locale}/jobs/${job.id}`,
+          cancelUrl: `${origin}/${locale}/checkout?job=${job.id}`,
+        });
+        if (paid.stripeCheckoutUrl?.startsWith("https://checkout.stripe.com/") && paid.status === "checkout") {
+          return NextResponse.redirect(paid.stripeCheckoutUrl, 303);
+        }
+        if (paid.status === "checkout") {
+          return redirectTo(request, `/${locale}/checkout`, { job: job.id, notice: "stripe" });
+        }
+        return NextResponse.redirect(appUrl(request, `/${locale}/jobs/${job.id}`), 303);
+      } catch (error) {
+        const live = error instanceof Error && /live Stripe/.test(error.message);
+        return redirectTo(request, `/${locale}/checkout`, { job: job.id, error: live ? "live" : "payment" });
+      }
+    }
     return NextResponse.redirect(appUrl(request, `/${locale}/checkout?job=${job.id}`), 303);
   } catch {
     return redirectTo(request, `/${locale}/listings/${slug}/intake`, {

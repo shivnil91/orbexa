@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { SiteHeader } from "@/components/site-header";
+import { StickyBar } from "@/components/sticky-bar";
 import { t } from "@/lib/i18n";
 import { isSupportedLocale, type Locale } from "@/lib/locale";
 import { currentUser } from "@/server/session";
@@ -14,43 +16,29 @@ export default async function LocaleLayout({
   const active: Locale = isSupportedLocale(locale) ? locale : "en";
   const user = await currentUser();
   const links = [
-    ["nav.browse", `/${active}/listings`],
-    ["nav.search", `/${active}/search`],
-    ["nav.sell", `/${active}/sell`],
-    ...(user ? [["nav.orders", `/${active}/orders`] as const] : []),
+    { href: `/${active}/get`, label: t(active, "home.buyerDoor") },
+    { href: `/${active}/earn`, label: t(active, "home.sellerDoor") },
+    ...(user ? [{ href: `/${active}/orders`, label: t(active, "nav.orders") }] : []),
+    ...(user?.admin ? [{ href: `/${active}/admin`, label: t(active, "nav.admin") }] : []),
   ];
   return (
     <>
       <a className="skip-link" href="#content">{t(active, "skip")}</a>
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-8">
-          <Link className="text-lg font-semibold tracking-tight" href={`/${active}`}>{t(active, "nav.home")}</Link>
-          <nav aria-label={t(active, "nav.primary")} className="flex max-w-full flex-wrap items-center gap-1">
-            {links.map(([key, href]) => (
-              <Link key={key} className="inline-flex min-h-11 items-center rounded-full px-3 text-sm underline-offset-4 hover:underline" href={href}>
-                {t(active, key)}
-              </Link>
-            ))}
-            {user?.admin ? (
-              <Link className="inline-flex min-h-11 items-center rounded-full px-3 text-sm underline-offset-4 hover:underline" href={`/${active}/admin`}>{t(active, "nav.admin")}</Link>
-            ) : null}
-            {user ? (
-              <Link className="inline-flex min-h-11 items-center rounded-full px-3 text-sm underline-offset-4 hover:underline" href={`/${active}/account`}>{user.name}</Link>
-            ) : (
-              <Link className="inline-flex min-h-11 items-center rounded-full px-3 text-sm underline-offset-4 hover:underline" href={`/${active}/sign-in`}>{t(active, "nav.signIn")}</Link>
-            )}
-            {user ? (
-              <form action="/api/auth/sign-out" method="post">
-                <input name="locale" type="hidden" value={active} />
-                <button className="inline-flex min-h-11 items-center rounded-full px-3 text-sm" type="submit">{t(active, "nav.signOut")}</button>
-              </form>
-            ) : (
-              <Link className="inline-flex min-h-11 items-center rounded-full bg-accent px-3 text-sm font-medium text-accent-foreground" href={`/${active}/register`}>{t(active, "nav.register")}</Link>
-            )}
-          </nav>
-        </div>
-      </header>
-      <div className="min-w-0 flex-1">{children}</div>
+      <p className="flex h-9 items-center justify-center bg-accent px-4 text-center text-xs font-medium text-accent-foreground">{t(active, "banner.demo")}</p>
+      <SiteHeader
+        accountHref={user ? `/${active}/account` : undefined}
+        accountLabel={user?.name}
+        homeHref={`/${active}`}
+        homeLabel={t(active, "nav.home")}
+        links={links}
+        locale={active}
+        menuLabel={t(active, "nav.menu")}
+        signInHref={user ? undefined : `/${active}/sign-in`}
+        signInLabel={user ? undefined : t(active, "nav.signIn")}
+        signOutLabel={user ? t(active, "nav.signOut") : undefined}
+      />
+      <div className="mobile-cta-space min-w-0 flex-1">{children}</div>
+      <StickyBar buyerLabel={t(active, "home.buyerDoor")} locale={active} sellerLabel={t(active, "sticky.publish")} />
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-6 text-sm leading-6 text-muted sm:px-8">
           <p>{t(active, "footer.honest")}</p>

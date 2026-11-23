@@ -432,7 +432,9 @@ export function cleanInterview(raw: InterviewAnswer[]): InterviewAnswer[] {
 }
 
 export function publishInterviewReady(answers: InterviewAnswer[]): boolean {
-  return interviewCount(answers) >= 5;
+  const count = interviewCount(answers);
+  // The three-step publish has no interview yet. A started interview has to be complete.
+  return count === 0 || count >= 5;
 }
 
 const TASKS: Record<string, string[]> = {

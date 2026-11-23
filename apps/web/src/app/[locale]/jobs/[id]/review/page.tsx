@@ -142,7 +142,7 @@ export default async function ReviewPage({
         {job.feedback.length > 0 ? (
           <ul className="text-sm">
             {job.feedback.map((item) => (
-              <li key={`${item.kind}-${item.at}`}>{item.kind} · {item.reward}</li>
+              <li key={`${item.kind}-${item.at}`}>{t(locale, feedbackKey(item.kind))}</li>
             ))}
           </ul>
         ) : null}
@@ -178,4 +178,11 @@ export default async function ReviewPage({
       </form> : null}
     </main>
   );
+}
+
+function feedbackKey(kind: string): string {
+  if (kind === "buyer_approve" || kind === "buyer_edit" || kind === "buyer_reject" || kind === "expert_rating") {
+    return `feedback.${kind}`;
+  }
+  return "feedback.other";
 }
